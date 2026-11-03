@@ -1,0 +1,100 @@
+{
+  "animations": {
+    "enabled": true,
+    "fade": 1.2,
+    "p1x": 0.05,
+    "p1y": 0.9,
+    "p2x": 0.1836734693877551,
+    "p2y": 1.0,
+    "preset": "Micro Snappy",
+    "window_style": "popin 90%",
+    "windows_in": 1.4,
+    "windows_move": 1.4,
+    "windows_out": 1.2,
+    "workspace_style": "slide",
+    "workspaces": 1.4
+  },
+  "display": {
+    "nightlight_enabled": false,
+    "nightlight_temp": 4200
+  },
+  "display_settings": {
+    "cursor_size": 24,
+    "mode": "1920x1200@60.00Hz",
+    "monitor_name": "eDP-1",
+    "scale": 1.2788461538461537,
+    "text_scale": 1.0,
+    "vrr": 0
+  },
+  "fuzzel": {
+    "border_radius": 4,
+    "horizontal_pad": 18,
+    "lines": 10,
+    "vertical_pad": 12,
+    "width": 46
+  },
+  "geometry": {
+    "active_border_1": "#ffffff",
+    "active_border_2": "#333333",
+    "border_angle": 45,
+    "border_size": 1,
+    "gaps_in": 0,
+    "gaps_out": 0,
+    "inactive_border": "#141414",
+    "rounding": 4
+  },
+  "grain": {
+    "algorithm": "gaussian",
+    "crosshair": false,
+    "intensity": 17.05128205128205,
+    "scale": 2,
+    "tint": "#d4d4d8"
+  },
+  "input": {
+    "disable_while_typing": true,
+    "natural_scroll": true,
+    "scroll_factor": 1.0,
+    "sensitivity": 0.0,
+    "tap_to_click": true
+  },
+  "opacity": {
+    "active_opacity": 1.0,
+    "blur_enabled": false,
+    "blur_passes": 2,
+    "blur_size": 7,
+    "fullscreen_opacity": 1.0,
+    "inactive_opacity": 1.0,
+    "shadow_enabled": true,
+    "shadow_range": 20
+  },
+  "taskgraph": {
+    "auto_freeze": true,
+    "center_gravity": 0.01,
+    "damping": 0.9019230769230768,
+    "drift_speed": 0.2,
+    "edge_alpha": 0.45,
+    "edge_width": 1.0,
+    "node_radius": 16.0,
+    "repulsion": 16000.0,
+    "repulsion_radius": 620.0,
+    "rest_length": 223.2051282051282,
+    "spring_k": 0.004321794871794872
+  },
+  "waybar": {
+    "drawer_enabled": false,
+    "font_size": 12,
+    "height": 33,
+    "position": "top",
+    "show_audio": true,
+    "show_backlight": true,
+    "show_battery": true,
+    "show_bluetooth": true,
+    "show_cpu": true,
+    "show_idle_inhibitor": true,
+    "show_memory": true,
+    "show_network": true,
+    "show_nightlight": true,
+    "show_notifications": true,
+    "show_power": true
+  }
+}

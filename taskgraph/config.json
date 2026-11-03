@@ -1,0 +1,141 @@
+{
+  "physics": {
+    "center_gravity": 0.01,
+    "damping": 0.9019230769230768,
+    "fuzzel_repulsion": 36.0,
+    "repulsion": 16000.0,
+    "repulsion_radius": 620.0,
+    "rest_length": 223.2051282051282,
+    "spring_k": 0.004321794871794872
+  },
+  "pinned": [
+    {
+      "exec": "obsidian",
+      "icon": "obsidian",
+      "id": "obsidian",
+      "load_to_ram": false,
+      "match_class": "obsidian",
+      "name": "Obsidian"
+    },
+    {
+      "exec": "firefox",
+      "icon": "firefox",
+      "id": "firefox",
+      "load_to_ram": false,
+      "match_class": "firefox",
+      "name": "Firefox"
+    },
+    {
+      "exec": "foot -c /home/boski/.config/monolith/foot/foot.ini --app-id=btop-monitor -e btop",
+      "icon": "btop",
+      "id": "btop",
+      "load_to_ram": false,
+      "match_class": "btop-monitor",
+      "name": "btop"
+    },
+    {
+      "exec": "spotify-launcher || spotify",
+      "icon": "spotify",
+      "id": "spotify",
+      "load_to_ram": false,
+      "match_class": "Spotify",
+      "name": "Spotify"
+    },
+    {
+      "exec": "vlc",
+      "icon": "vlc",
+      "id": "vlc",
+      "load_to_ram": false,
+      "match_class": "vlc",
+      "name": "VLC"
+    },
+    {
+      "exec": "zed",
+      "icon": "zed",
+      "id": "zed",
+      "load_to_ram": false,
+      "match_class": "dev.zed.Zed",
+      "name": "Zed"
+    },
+    {
+      "exec": "caprine",
+      "icon": "caprine",
+      "id": "caprine",
+      "load_to_ram": false,
+      "match_class": "Caprine",
+      "name": "Caprine"
+    },
+    {
+      "exec": "signal-desktop",
+      "icon": "signal-desktop",
+      "id": "signal",
+      "load_to_ram": false,
+      "match_class": "signal",
+      "name": "Signal"
+    },
+    {
+      "exec": "dolphin",
+      "icon": "org.kde.dolphin",
+      "id": "dolphin",
+      "load_to_ram": false,
+      "match_class": "dolphin",
+      "name": "Dolphin"
+    },
+    {
+      "exec": "telegram-desktop",
+      "icon": "telegram",
+      "id": "telegram",
+      "load_to_ram": false,
+      "match_class": "org.telegram.desktop",
+      "name": "Telegram"
+    },
+    {
+      "exec": "vesktop",
+      "icon": "vesktop",
+      "id": "vesktop",
+      "load_to_ram": false,
+      "match_class": "vesktop",
+      "name": "Discord"
+    },
+    {
+      "exec": "gimp",
+      "icon": "gimp",
+      "id": "gimp",
+      "load_to_ram": false,
+      "match_class": "gimp",
+      "name": "GIMP"
+    },
+    {
+      "exec": "obs",
+      "icon": "com.obsproject.Studio",
+      "id": "obs",
+      "load_to_ram": false,
+      "match_class": "obs",
+      "name": "OBS Studio"
+    },
+    {
+      "exec": "qbittorrent",
+      "icon": "qbittorrent",
+      "id": "qbittorrent",
+      "load_to_ram": false,
+      "match_class": "org.qbittorrent.qBittorrent",
+      "name": "qBittorrent"
+    },
+    {
+      "exec": "localsend",
+      "icon": "localsend",
+      "id": "localsend",
+      "load_to_ram": false,
+      "match_class": "localsend",
+      "name": "LocalSend"
+    },
+    {
+      "exec": "zen",
+      "icon": "zen-browser",
+      "id": "zen",
+      "load_to_ram": false,
+      "match_class": "zen-beta",
+      "name": "Zen"
+    }
+  ]
+}

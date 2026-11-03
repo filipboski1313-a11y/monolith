@@ -1,0 +1,22 @@
+# Build outputs and binaries
+bin/
+*.o
+*.so
+*.a
+
+# Test artifacts
+test_*
+*.out
+
+# Python cache & backups
+__pycache__/
+*.py[cod]
+*$py.class
+*.bak
+
+# Runtime state and temporary locks
+*.lock
+/tmp/
+
+# User private scratchpad
+scratchpad.txt

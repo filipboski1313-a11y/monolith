@@ -1,0 +1,217 @@
+/* Monolith Architectural Minimalist SwayNC Stylesheet (Pure OLED #000000) */
+* {
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  font-size: 11px;
+}
+
+/* Clear all window backgrounds */
+notificationwindow,
+blankwindow,
+.blank-window,
+.floating-notifications {
+  background: transparent;
+}
+
+/* Floating Notification Toasts */
+.notification-row {
+  background: transparent;
+  outline: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notification-row .notification-background {
+  padding: 4px 10px;
+  background: transparent;
+}
+
+.notification-row .notification-background .notification {
+  background: #000000;
+  border: 1px solid #222222;
+  border-radius: 4px;
+  padding: 10px 14px;
+  color: #f4f4f5;
+  box-shadow: none;
+  transition: all 0.12s ease-out;
+}
+
+.notification-row .notification-background .notification:hover {
+  border-color: #3a3a3a;
+  background: #050505;
+}
+
+.notification-row .notification-background .notification.critical {
+  border-left: 2px solid #ef4444;
+}
+
+.notification-row .notification-background .notification.low {
+  border-color: #161616;
+}
+
+.notification-default-action {
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+.notification-content {
+  padding: 0;
+  margin: 0;
+}
+
+/* Micro Header (App Name + Time) */
+.app-name {
+  color: #555555;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 3px;
+}
+
+.time {
+  color: #444444;
+  font-size: 9px;
+  margin-right: 4px;
+}
+
+/* Title & Body */
+.summary {
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.25;
+  margin-bottom: 2px;
+}
+
+.body {
+  color: #999999;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+/* Close Button */
+.close-button {
+  background: transparent;
+  color: #555555;
+  border: none;
+  border-radius: 2px;
+  padding: 0;
+  margin: 0;
+  min-height: 18px;
+  min-width: 18px;
+  transition: all 0.12s ease-out;
+}
+
+.close-button:hover {
+  background: #141414;
+  color: #ef4444;
+}
+
+/* Icon / Avatar */
+.image {
+  border-radius: 3px;
+  margin-right: 12px;
+}
+
+.app-icon {
+  margin-right: 8px;
+}
+
+/* Notification Action Buttons */
+.notification-action {
+  background: #080808;
+  border: 1px solid #222222;
+  border-radius: 2px;
+  color: #cccccc;
+  font-size: 10px;
+  padding: 4px 10px;
+  margin-top: 6px;
+  margin-right: 6px;
+  transition: all 0.12s ease-out;
+}
+
+.notification-action:hover {
+  background: #141414;
+  border-color: #383838;
+  color: #ffffff;
+}
+
+/* Control Center Panel (Slide-out) */
+.control-center {
+  background: #000000;
+  border: 1px solid #222222;
+  border-radius: 4px;
+  color: #f4f4f5;
+  padding: 14px;
+  box-shadow: none;
+}
+
+.control-center .widget-title {
+  color: #777777;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.control-center .widget-title > button {
+  background: #080808;
+  color: #888888;
+  border: 1px solid #222222;
+  border-radius: 2px;
+  padding: 3px 8px;
+  font-size: 10px;
+  transition: all 0.12s ease-out;
+}
+
+.control-center .widget-title > button:hover {
+  background: #141414;
+  border-color: #383838;
+  color: #ffffff;
+}
+
+/* DND (Do Not Disturb) Widget */
+.widget-dnd {
+  background: #000000;
+  border: 1px solid #1a1a1a;
+  border-radius: 3px;
+  margin: 6px 0 10px 0;
+  padding: 6px 10px;
+  color: #888888;
+  font-size: 10.5px;
+}
+
+.widget-dnd > switch {
+  background: #1a1a1a;
+  border-radius: 10px;
+}
+
+.widget-dnd > switch:checked {
+  background: #f4f4f5;
+}
+
+/* MPRIS Media Player Widget */
+.widget-mpris {
+  background: #000000;
+  border: 1px solid #1a1a1a;
+  border-radius: 3px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.widget-mpris-player {
+  padding: 2px;
+}
+
+.widget-mpris-title {
+  font-weight: 600;
+  font-size: 11px;
+  color: #ffffff;
+}
+
+.widget-mpris-subtitle {
+  color: #777777;
+  font-size: 10px;
+}

@@ -1,0 +1,205 @@
+{
+  "backlight": {
+    "format": "{icon} {percent}%",
+    "format-icons": [
+      "\udb80\udcde",
+      "\udb80\udcdf",
+      "\udb80\udce0"
+    ],
+    "scroll-step": 2
+  },
+  "battery": {
+    "format": "{icon} {capacity}%",
+    "format-charging": "\udb80\udc84 {capacity}%",
+    "format-icons": [
+      "\udb80\udc7a",
+      "\udb80\udc7b",
+      "\udb80\udc7c",
+      "\udb80\udc7d",
+      "\udb80\udc7e",
+      "\udb80\udc7f",
+      "\udb80\udc80",
+      "\udb80\udc81",
+      "\udb80\udc82",
+      "\udb80\udc79"
+    ],
+    "format-plugged": "\udb80\udc84 {capacity}%",
+    "interval": 10,
+    "states": {
+      "critical": 10,
+      "warning": 20
+    }
+  },
+  "bluetooth": {
+    "format": "\udb80\udcaf",
+    "format-connected": "\udb80\udcb1 {device_alias}",
+    "format-connected-battery": "\udb80\udcb1 {device_alias} {device_battery_percentage}%",
+    "format-disabled": "\udb80\udcb2",
+    "on-click": "monolith-popup bluetooth",
+    "tooltip-format": "{controller_alias}\t{controller_address}\n{num_connections} connected devices",
+    "tooltip-format-connected": "{controller_alias}\t{controller_address}\n{num_connections} connected devices\n\n{device_enumerate}",
+    "tooltip-format-enumerate-connected": "\u25cf {device_alias}\t{device_address}"
+  },
+  "clock": {
+    "format": "{:%H:%M:%S}",
+    "format-alt": "{:%A, %d %b %Y  %H:%M}",
+    "interval": 1,
+    "tooltip": false
+  },
+  "cpu": {
+    "format": "\udb80\udf5b {usage}%",
+    "interval": 3,
+    "on-click": "monolith-popup system"
+  },
+  "custom/drawer_toggle": {
+    "format": "\udb81\udc03",
+    "tooltip": "System Drawer [Pinned] (Click to collapse)",
+    "on-click": "~/.config/monolith/scripts/drawer-toggle.sh"
+  },
+  "custom/menu": {
+    "format": "\udb82\udcc7",
+    "on-click": "pkill fuzzel || fuzzel --config ~/.config/monolith/fuzzel/fuzzel.ini",
+    "tooltip": "Application Menu (SUPER)"
+  },
+  "custom/nightlight": {
+    "format": "\udb80\udcdd",
+    "on-click": "~/.config/monolith/scripts/nightlight.sh",
+    "tooltip": "Toggle Night Light (Hyprsunset)"
+  },
+  "custom/notification": {
+    "format": "\udb80\udc9a",
+    "on-click": "swaync-client -t -sw",
+    "tooltip": "Notifications (SwayNC)"
+  },
+  "custom/power": {
+    "format": "\udb81\udc25",
+    "on-click": "monolith-popup power",
+    "tooltip": "Power Menu"
+  },
+  "custom/settings": {
+    "format": "\udb81\udc93",
+    "on-click": "monolith-settings",
+    "tooltip": "Monolith Settings (SUPER+I)"
+  },
+  "custom/spatial_tab": {
+    "exec": "~/.config/monolith/scripts/waybar-spatial-tab.sh",
+    "format": "{}",
+    "interval": 2,
+    "on-click": "~/.config/monolith/scripts/spatial-tab.sh up",
+    "on-click-right": "~/.config/monolith/scripts/spatial-tab.sh down",
+    "return-type": "json",
+    "signal": 8
+  },
+  "group/drawer": {
+    "orientation": "horizontal",
+    "drawer": {
+      "transition-duration": 200,
+      "children-class": "drawer-child",
+      "transition-left-to-right": false,
+      "click-to-reveal": false
+    },
+    "modules": [
+      "custom/drawer_toggle",
+      "idle_inhibitor",
+      "bluetooth",
+      "network",
+      "pulseaudio",
+      "backlight",
+      "battery",
+      "cpu",
+      "memory",
+      "custom/nightlight"
+    ]
+  },
+  "height": 33,
+  "hyprland/window": {
+    "format": "\u2502  {title}",
+    "max-length": 40,
+    "rewrite": {
+      "(.*) - Chromium": "\udb80\udeaf $1",
+      "(.*) - Zen Browser": "\udb80\ude39 $1",
+      "(.*) \u2014 Mozilla Firefox": "\udb80\ude39 $1",
+      "^$": "",
+      "foot": "\uf120 Terminal"
+    },
+    "separate-outputs": true
+  },
+  "hyprland/workspaces": {
+    "all-outputs": true,
+    "disable-scroll": true,
+    "format": "{name}",
+    "on-click": "activate"
+  },
+  "idle_inhibitor": {
+    "format": "{icon}",
+    "format-icons": {
+      "activated": "\udb80\ude08 AWAKE",
+      "deactivated": "\udb80\ude09"
+    },
+    "tooltip": true,
+    "tooltip-format-activated": "Keep Awake: ACTIVE (Screen & sleep inhibited)",
+    "tooltip-format-deactivated": "Keep Awake: INACTIVE (Standard power management)"
+  },
+  "layer": "top",
+  "margin-bottom": 0,
+  "margin-left": 0,
+  "margin-right": 0,
+  "margin-top": 0,
+  "memory": {
+    "format": "\udb81\ude1a {used:0.1f}G",
+    "interval": 5,
+    "on-click": "monolith-popup system",
+    "tooltip-format": "Used: {used:0.2f} GiB / {total:0.2f} GiB ({percentage}%)"
+  },
+  "modules-center": [
+    "clock"
+  ],
+  "modules-left": [
+    "hyprland/workspaces",
+    "custom/spatial_tab",
+    "hyprland/window"
+  ],
+  "modules-right": [
+    "custom/drawer_toggle",
+    "idle_inhibitor",
+    "bluetooth",
+    "network",
+    "pulseaudio",
+    "backlight",
+    "battery",
+    "cpu",
+    "memory",
+    "custom/nightlight",
+    "custom/settings",
+    "custom/notification",
+    "custom/power"
+  ],
+  "network": {
+    "format-disconnected": "\udb81\uddaa off",
+    "format-ethernet": "\udb80\ude00 {ifname}",
+    "format-linked": "\udb80\ude00 link",
+    "format-wifi": "\udb81\udda9 {essid}",
+    "interval": 5,
+    "on-click": "monolith-popup network",
+    "tooltip-format": "{ifname} via {gwaddr} ({signalStrength}%)"
+  },
+  "position": "top",
+  "pulseaudio": {
+    "format": "{icon} {volume}%",
+    "format-icons": {
+      "default": [
+        "\udb81\udd7f",
+        "\udb81\udd80",
+        "\udb81\udd7e"
+      ],
+      "hands-free": "\udb80\udecb",
+      "headphone": "\udb80\udecb",
+      "headset": "\udb80\udecb"
+    },
+    "format-muted": "\udb81\udd81 mut",
+    "on-click": "monolith-popup audio",
+    "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+    "scroll-step": 2
+  },
+  "spacing": 0
+}

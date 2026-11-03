@@ -1,0 +1,110 @@
+* {
+    border: none;
+    border-radius: 0;
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 600;
+    font-size: 12px;
+    min-height: 0;
+}
+
+window#waybar {
+    background: #000000;
+    color: #e4e4e7;
+    border-bottom: 1px solid #141414;
+}
+
+#workspaces button {
+    padding: 0 6px;
+    background: transparent;
+    color: #52525b;
+    border-radius: 2px;
+    margin: 2px 1px;
+}
+#workspaces button.active {
+    background: #18181b;
+    color: #ffffff;
+}
+
+#custom-spatial_tab {
+    padding: 0 8px;
+    margin: 3px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    border-radius: 2px;
+    background: #0a0a0a;
+    border: 1px solid #27272a;
+    color: #a1a1aa;
+}
+#custom-spatial_tab.tab-spotify {
+    background: #0f2415;
+    border-color: #1db954;
+    color: #1ed760;
+}
+#custom-spatial_tab.tab-extra {
+    background: #231808;
+    border-color: #d97706;
+    color: #f59e0b;
+}
+#custom-spatial_tab.tab-desktop {
+    background: #0f0f10;
+    border-color: #27272a;
+    color: #e4e4e7;
+}
+
+#custom-drawer_toggle {
+    padding: 0 7px;
+    margin: 3px 2px;
+    color: #e4e4e7;
+    background: #111111;
+    border: 1px solid #222222;
+    border-radius: 2px;
+}
+#custom-drawer_toggle:hover {
+    background: #1f1f23;
+    border-color: #52525b;
+    color: #ffffff;
+}
+
+#idle_inhibitor {
+    padding: 0 6px;
+    color: #71717a;
+}
+#idle_inhibitor.activated {
+    color: #f59e0b;
+    background: #231b0e;
+}
+
+#bluetooth {
+    padding: 0 6px;
+    color: #71717a;
+}
+#bluetooth.connected {
+    color: #38bdf8;
+}
+#bluetooth.disabled {
+    color: #3f3f46;
+}
+
+#clock, #battery, #cpu, #memory, #network, #pulseaudio, #backlight, #custom-nightlight, #custom-settings, #custom-notification, #custom-power {
+    padding: 0 7px;
+    color: #d4d4d8;
+}
+#battery.warning { color: #f59e0b; }
+#battery.critical { color: #ef4444; }
+
+tooltip {
+    background: #000000;
+    border: 1px solid #27272a;
+    border-radius: 2px;
+}
+tooltip label {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: #e4e4e7;
+    padding: 3px 6px;
+}
+.drawer-child {
+    padding: 0 5px;
+    margin: 2px 1px;
+}
