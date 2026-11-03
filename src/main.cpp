@@ -38,10 +38,10 @@ struct AppContext {
     // Grain controls
     GtkAdjustment* adj_grain_intensity = nullptr;
     GtkAdjustment* adj_grain_scale = nullptr;
-    GtkWidget* entry_grain_c1 = nullptr;
-    GtkWidget* entry_grain_c2 = nullptr;
-    GtkWidget* entry_grain_c3 = nullptr;
-    GtkWidget* entry_grain_tint = nullptr;
+    struct ColorControl* ctrl_grain_c1 = nullptr;
+    struct ColorControl* ctrl_grain_c2 = nullptr;
+    struct ColorControl* ctrl_grain_c3 = nullptr;
+    struct ColorControl* ctrl_grain_tint = nullptr;
 };
 
 static AppContext g_app;
@@ -180,7 +180,7 @@ static AdwComboRow* make_combo_row(
     return row;
 }
 
-static AdwEntryRow* make_entry_row(
+[[maybe_unused]] static AdwEntryRow* make_entry_row(
     AdwPreferencesGroup* group,
     const std::string& title,
     const std::string& initial_val,
@@ -200,6 +200,113 @@ static AdwEntryRow* make_entry_row(
     return row;
 }
 
+struct ColorControl {
+    GtkWidget* color_btn = nullptr;
+    GtkWidget* entry = nullptr;
+    std::function<void(const std::string&)> on_change;
+    bool updating = false;
+};
+
+static void set_color_control_value(ColorControl* ctrl, const std::string& hex) {
+    if (!ctrl || ctrl->updating) return;
+    ctrl->updating = true;
+    std::string clean = hex;
+    if (clean.empty()) clean = "#000000";
+    if (clean.front() != '#') clean = "#" + clean;
+    GdkRGBA rgba;
+    if (gdk_rgba_parse(&rgba, clean.c_str())) {
+        gtk_color_dialog_button_set_rgba(GTK_COLOR_DIALOG_BUTTON(ctrl->color_btn), &rgba);
+    }
+    std::string digits = clean.substr(1);
+    gtk_editable_set_text(GTK_EDITABLE(ctrl->entry), digits.c_str());
+    ctrl->updating = false;
+}
+
+static ColorControl* make_color_row(
+    AdwPreferencesGroup* group,
+    const std::string& title,
+    const std::string& subtitle,
+    const std::string& initial_hex,
+    std::function<void(const std::string&)> on_change
+) {
+    AdwActionRow* row = ADW_ACTION_ROW(adw_action_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title.c_str());
+    if (!subtitle.empty()) {
+        adw_action_row_set_subtitle(row, subtitle.c_str());
+    }
+
+    GtkWidget* suffix_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_valign(suffix_box, GTK_ALIGN_CENTER);
+
+    // Color Palette / Dialog Button
+    GtkColorDialog* dialog = gtk_color_dialog_new();
+    gtk_color_dialog_set_with_alpha(dialog, FALSE);
+    gtk_color_dialog_set_title(dialog, title.c_str());
+
+    GtkWidget* color_btn = gtk_color_dialog_button_new(dialog);
+    gtk_widget_set_valign(color_btn, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text(color_btn, "Open color palette");
+
+    // Custom Hex Entry with '#' label
+    GtkWidget* hash_lbl = gtk_label_new("#");
+    gtk_widget_add_css_class(hash_lbl, "dim-label");
+    gtk_widget_set_margin_start(hash_lbl, 6);
+    gtk_widget_set_margin_end(hash_lbl, 2);
+
+    GtkWidget* entry = gtk_entry_new();
+    gtk_widget_set_size_request(entry, 86, -1);
+    gtk_entry_set_max_length(GTK_ENTRY(entry), 8);
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "000000");
+    gtk_widget_set_tooltip_text(entry, "Custom hex code (e.g. 18181b or #ff0055)");
+
+    gtk_box_append(GTK_BOX(suffix_box), color_btn);
+    gtk_box_append(GTK_BOX(suffix_box), hash_lbl);
+    gtk_box_append(GTK_BOX(suffix_box), entry);
+
+    adw_action_row_add_suffix(row, suffix_box);
+    adw_preferences_group_add(group, GTK_WIDGET(row));
+
+    auto* ctrl = new ColorControl{color_btn, entry, on_change, false};
+    set_color_control_value(ctrl, initial_hex);
+
+    // Sync from Palette button to Entry
+    g_signal_connect(color_btn, "notify::rgba", G_CALLBACK((+[](GObject* obj, GParamSpec*, gpointer p) {
+        auto* c = static_cast<ColorControl*>(p);
+        if (c->updating) return;
+        c->updating = true;
+        const GdkRGBA* col = gtk_color_dialog_button_get_rgba(GTK_COLOR_DIALOG_BUTTON(obj));
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%02x%02x%02x",
+            std::clamp(static_cast<int>(col->red * 255.0 + 0.5), 0, 255),
+            std::clamp(static_cast<int>(col->green * 255.0 + 0.5), 0, 255),
+            std::clamp(static_cast<int>(col->blue * 255.0 + 0.5), 0, 255));
+        gtk_editable_set_text(GTK_EDITABLE(c->entry), buf);
+        std::string full_hex = std::string("#") + buf;
+        c->on_change(full_hex);
+        c->updating = false;
+    })), ctrl);
+
+    // Sync from Custom Entry to Palette button
+    g_signal_connect(entry, "changed", G_CALLBACK((+[](GtkEditable* e, gpointer p) {
+        auto* c = static_cast<ColorControl*>(p);
+        if (c->updating) return;
+        std::string text = gtk_editable_get_text(e);
+        while (!text.empty() && (text.front() == '#' || text.front() == ' ')) text.erase(text.begin());
+        if (text.length() == 6 || text.length() == 3 || text.length() == 8) {
+            std::string full_hex = "#" + text;
+            GdkRGBA parsed;
+            if (gdk_rgba_parse(&parsed, full_hex.c_str())) {
+                c->updating = true;
+                gtk_color_dialog_button_set_rgba(GTK_COLOR_DIALOG_BUTTON(c->color_btn), &parsed);
+                c->on_change(full_hex);
+                c->updating = false;
+            }
+        }
+    })), ctrl);
+
+    return ctrl;
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // PAGE 1: APPEARANCE & COLORS
 // ──────────────────────────────────────────────────────────────────────────────
@@ -215,17 +322,17 @@ static GtkWidget* build_appearance_page() {
     adw_preferences_group_set_title(g_borders, "Window Borders & Architecture");
     adw_preferences_group_set_description(g_borders, "Crisp geometry, dual-color gradient borders, and gaps.");
 
-    make_entry_row(g_borders, "Active Border Color 1 (Hex)", g_app.s.geom.active_border_1, [](const std::string& s) {
+    make_color_row(g_borders, "Active Border Color 1", "Primary gradient accent for focused windows", g_app.s.geom.active_border_1, [](const std::string& s) {
         g_app.s.geom.active_border_1 = s;
     });
-    make_entry_row(g_borders, "Active Border Color 2 (Hex)", g_app.s.geom.active_border_2, [](const std::string& s) {
+    make_color_row(g_borders, "Active Border Color 2", "Secondary gradient accent for focused windows", g_app.s.geom.active_border_2, [](const std::string& s) {
         g_app.s.geom.active_border_2 = s;
     });
     make_slider_row(g_borders, "Border Gradient Angle", "Rotation angle of the dual-color gradient", 0.0, 360.0, 15.0, g_app.s.geom.border_angle, nullptr, [](double v) {
         g_app.s.geom.border_angle = static_cast<int>(v);
     }, [](double v) { return std::to_string(static_cast<int>(v)) + "°"; });
 
-    make_entry_row(g_borders, "Inactive Border Color (Hex)", g_app.s.geom.inactive_border, [](const std::string& s) {
+    make_color_row(g_borders, "Inactive Border Color", "Border perimeter for unfocused background windows", g_app.s.geom.inactive_border, [](const std::string& s) {
         g_app.s.geom.inactive_border = s;
     });
 
@@ -272,16 +379,16 @@ static GtkWidget* build_appearance_page() {
     adw_preferences_group_set_title(g_wb_col, "Status Bar Colors (Waybar)");
     adw_preferences_group_set_description(g_wb_col, "Individual color overrides for the top bar and widgets.");
 
-    make_entry_row(g_wb_col, "Bar Background Color (Hex)", g_app.s.waybar.bg_color, [](const std::string& s) {
+    make_color_row(g_wb_col, "Bar Background Color", "Surface color of the top bar container", g_app.s.waybar.bg_color, [](const std::string& s) {
         g_app.s.waybar.bg_color = s;
     });
-    make_entry_row(g_wb_col, "Bar Border Color (Hex)", g_app.s.waybar.border_color, [](const std::string& s) {
+    make_color_row(g_wb_col, "Bar Border Color", "Bottom separator line color", g_app.s.waybar.border_color, [](const std::string& s) {
         g_app.s.waybar.border_color = s;
     });
-    make_entry_row(g_wb_col, "Bar Text & Icon Color (Hex)", g_app.s.waybar.text_color, [](const std::string& s) {
+    make_color_row(g_wb_col, "Bar Text & Icon Color", "Default foreground tint for clocks and labels", g_app.s.waybar.text_color, [](const std::string& s) {
         g_app.s.waybar.text_color = s;
     });
-    make_entry_row(g_wb_col, "Active Workspace Accent (Hex)", g_app.s.waybar.active_ws_bg, [](const std::string& s) {
+    make_color_row(g_wb_col, "Active Workspace Accent", "Pill highlight for the currently focused workspace", g_app.s.waybar.active_ws_bg, [](const std::string& s) {
         g_app.s.waybar.active_ws_bg = s;
     });
 
@@ -374,10 +481,10 @@ static GtkWidget* build_grain_page() {
             default:
                 break;
         }
-        if (g_app.entry_grain_c1) gtk_editable_set_text(GTK_EDITABLE(g_app.entry_grain_c1), g_app.s.grain.color1.c_str());
-        if (g_app.entry_grain_c2) gtk_editable_set_text(GTK_EDITABLE(g_app.entry_grain_c2), g_app.s.grain.color2.c_str());
-        if (g_app.entry_grain_c3) gtk_editable_set_text(GTK_EDITABLE(g_app.entry_grain_c3), g_app.s.grain.color3.c_str());
-        if (g_app.entry_grain_tint) gtk_editable_set_text(GTK_EDITABLE(g_app.entry_grain_tint), g_app.s.grain.tint.c_str());
+        if (g_app.ctrl_grain_c1) set_color_control_value(g_app.ctrl_grain_c1, g_app.s.grain.color1);
+        if (g_app.ctrl_grain_c2) set_color_control_value(g_app.ctrl_grain_c2, g_app.s.grain.color2);
+        if (g_app.ctrl_grain_c3) set_color_control_value(g_app.ctrl_grain_c3, g_app.s.grain.color3);
+        if (g_app.ctrl_grain_tint) set_color_control_value(g_app.ctrl_grain_tint, g_app.s.grain.tint);
     });
 
     // Gradient Direction / Geometry
@@ -402,21 +509,21 @@ static GtkWidget* build_grain_page() {
     });
 
     // Color Pickers
-    g_app.entry_grain_c1 = GTK_WIDGET(make_entry_row(g_grad, "Color 1: Base / Bottom (Hex)", g_app.s.grain.color1, [](const std::string& s) {
+    g_app.ctrl_grain_c1 = make_color_row(g_grad, "Color 1 (Base / Bottom)", "Gradient baseline anchor at bottom center", g_app.s.grain.color1, [](const std::string& s) {
         g_app.s.grain.color1 = s;
-    }));
+    });
 
-    g_app.entry_grain_c2 = GTK_WIDGET(make_entry_row(g_grad, "Color 2: Top / Left (Hex)", g_app.s.grain.color2, [](const std::string& s) {
+    g_app.ctrl_grain_c2 = make_color_row(g_grad, "Color 2 (Top / Left)", "Upper gradient tone at top-left", g_app.s.grain.color2, [](const std::string& s) {
         g_app.s.grain.color2 = s;
-    }));
+    });
 
-    g_app.entry_grain_c3 = GTK_WIDGET(make_entry_row(g_grad, "Color 3: Top-Right Lower (Hex)", g_app.s.grain.color3, [](const std::string& s) {
+    g_app.ctrl_grain_c3 = make_color_row(g_grad, "Color 3 (Top-Right Lower)", "Secondary upper tone for 3-color mesh gradients", g_app.s.grain.color3, [](const std::string& s) {
         g_app.s.grain.color3 = s;
-    }));
+    });
 
-    g_app.entry_grain_tint = GTK_WIDGET(make_entry_row(g_grad, "Grain Noise Particle Tint (Hex)", g_app.s.grain.tint, [](const std::string& s) {
+    g_app.ctrl_grain_tint = make_color_row(g_grad, "Grain Particle Tint", "Color tint of the stochastically scattered film grain", g_app.s.grain.tint, [](const std::string& s) {
         g_app.s.grain.tint = s;
-    }));
+    });
 
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(g_grad));
 
@@ -659,15 +766,15 @@ static GtkWidget* build_waybar_page() {
     adw_preferences_group_set_title(g_mods, "Module Visibility");
     adw_preferences_group_set_description(g_mods, "Toggle active modules on the status bar.");
 
-    make_switch_row(g_mods, "󰕾 Audio & Volume", "WirePlumber audio controls", g_app.s.waybar.show_audio, [](bool b) { g_app.s.waybar.show_audio = b; });
-    make_switch_row(g_mods, "󰖩 Network & Wi-Fi", "NetworkManager connection status", g_app.s.waybar.show_network, [](bool b) { g_app.s.waybar.show_network = b; });
-    make_switch_row(g_mods, "󰂯 Bluetooth", "Bluetooth controller and device manager", g_app.s.waybar.show_bluetooth, [](bool b) { g_app.s.waybar.show_bluetooth = b; });
-    make_switch_row(g_mods, "󰍛 CPU Usage", "Live processor load percentage", g_app.s.waybar.show_cpu, [](bool b) { g_app.s.waybar.show_cpu = b; });
-    make_switch_row(g_mods, "󰘚 RAM Usage", "Physical memory consumption", g_app.s.waybar.show_memory, [](bool b) { g_app.s.waybar.show_memory = b; });
-    make_switch_row(g_mods, "󰃞 Backlight Brightness", "Display brightness indicator", g_app.s.waybar.show_backlight, [](bool b) { g_app.s.waybar.show_backlight = b; });
-    make_switch_row(g_mods, "󰂄 Battery Status", "Laptop battery percentage and charge state", g_app.s.waybar.show_battery, [](bool b) { g_app.s.waybar.show_battery = b; });
-    make_switch_row(g_mods, "󰃝 Night Light Filter", "Quick toggle for Hyprsunset blue light filter", g_app.s.waybar.show_nightlight, [](bool b) { g_app.s.waybar.show_nightlight = b; });
-    make_switch_row(g_mods, "󰂚 Notifications", "SwayNC notification center toggle", g_app.s.waybar.show_notifications, [](bool b) { g_app.s.waybar.show_notifications = b; });
+    make_switch_row(g_mods, "Audio & Volume", "WirePlumber audio controls", g_app.s.waybar.show_audio, [](bool b) { g_app.s.waybar.show_audio = b; });
+    make_switch_row(g_mods, "Network & Wi-Fi", "NetworkManager connection status", g_app.s.waybar.show_network, [](bool b) { g_app.s.waybar.show_network = b; });
+    make_switch_row(g_mods, "Bluetooth", "Bluetooth controller and device manager", g_app.s.waybar.show_bluetooth, [](bool b) { g_app.s.waybar.show_bluetooth = b; });
+    make_switch_row(g_mods, "CPU Usage", "Live processor load percentage", g_app.s.waybar.show_cpu, [](bool b) { g_app.s.waybar.show_cpu = b; });
+    make_switch_row(g_mods, "RAM Usage", "Physical memory consumption", g_app.s.waybar.show_memory, [](bool b) { g_app.s.waybar.show_memory = b; });
+    make_switch_row(g_mods, "Backlight Brightness", "Display brightness indicator", g_app.s.waybar.show_backlight, [](bool b) { g_app.s.waybar.show_backlight = b; });
+    make_switch_row(g_mods, "Battery Status", "Laptop battery percentage and charge state", g_app.s.waybar.show_battery, [](bool b) { g_app.s.waybar.show_battery = b; });
+    make_switch_row(g_mods, "Night Light Filter", "Quick toggle for Hyprsunset blue light filter", g_app.s.waybar.show_nightlight, [](bool b) { g_app.s.waybar.show_nightlight = b; });
+    make_switch_row(g_mods, "Notifications", "SwayNC notification center toggle", g_app.s.waybar.show_notifications, [](bool b) { g_app.s.waybar.show_notifications = b; });
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(g_mods));
 
     // Bar Colors & Visual Styling
@@ -675,19 +782,19 @@ static GtkWidget* build_waybar_page() {
     adw_preferences_group_set_title(g_wb_colors, "Status Bar Colors & Visual Palette");
     adw_preferences_group_set_description(g_wb_colors, "Full color control over bar background, borders, module icons, and active workspaces.");
 
-    make_entry_row(g_wb_colors, "Bar Background Color (Hex)", g_app.s.waybar.bg_color, [](const std::string& s) {
+    make_color_row(g_wb_colors, "Bar Background Color", "Surface color of the top bar container", g_app.s.waybar.bg_color, [](const std::string& s) {
         g_app.s.waybar.bg_color = s;
     });
-    make_entry_row(g_wb_colors, "Bar Border Color (Hex)", g_app.s.waybar.border_color, [](const std::string& s) {
+    make_color_row(g_wb_colors, "Bar Border Color", "Bottom separator line color", g_app.s.waybar.border_color, [](const std::string& s) {
         g_app.s.waybar.border_color = s;
     });
-    make_entry_row(g_wb_colors, "Module Icons & Status Text Color (Hex)", g_app.s.waybar.text_color, [](const std::string& s) {
+    make_color_row(g_wb_colors, "Module Icons & Status Text Color", "Foreground tint for status indicators and icons", g_app.s.waybar.text_color, [](const std::string& s) {
         g_app.s.waybar.text_color = s;
     });
-    make_entry_row(g_wb_colors, "Active Workspace Button Background (Hex)", g_app.s.waybar.active_ws_bg, [](const std::string& s) {
+    make_color_row(g_wb_colors, "Active Workspace Button Background", "Pill highlight for the currently focused workspace", g_app.s.waybar.active_ws_bg, [](const std::string& s) {
         g_app.s.waybar.active_ws_bg = s;
     });
-    make_entry_row(g_wb_colors, "Active Workspace Text / Icon Color (Hex)", g_app.s.waybar.active_ws_text, [](const std::string& s) {
+    make_color_row(g_wb_colors, "Active Workspace Text / Icon Color", "Text and icon color inside the active workspace pill", g_app.s.waybar.active_ws_text, [](const std::string& s) {
         g_app.s.waybar.active_ws_text = s;
     });
 
@@ -818,7 +925,7 @@ static GtkWidget* build_about_page() {
 // ──────────────────────────────────────────────────────────────────────────────
 static void on_apply_clicked(GtkButton*, gpointer) {
     g_app.s.save();
-    show_toast("✓ All settings and visual parameters applied successfully!");
+    show_toast("All settings and visual parameters applied successfully.");
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -920,14 +1027,14 @@ static void on_app_activate(GApplication* app, gpointer) {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(g_app.sidebar_list), GTK_SELECTION_SINGLE);
 
     std::vector<std::pair<std::string, std::string>> categories = {
-        {"🎨 Appearance & Colors", "appearance"},
-        {"🌌 Gradient & Grain", "grain"},
-        {"⚡ Motion & Bézier", "motion"},
-        {"📊 Desktop Task Graph", "taskgraph"},
-        {"🎛️ Waybar & Modules", "waybar"},
-        {"⌨️ Input & Touchpad", "input"},
-        {"🌙 Display & Night Light", "display"},
-        {"ℹ️ About Monolith", "about"}
+        {"Appearance & Colors", "appearance"},
+        {"Gradient & Grain", "grain"},
+        {"Motion & Bézier", "motion"},
+        {"Desktop Task Graph", "taskgraph"},
+        {"Waybar & Modules", "waybar"},
+        {"Input & Touchpad", "input"},
+        {"Display & Night Light", "display"},
+        {"About Monolith", "about"}
     };
 
     for (const auto& cat : categories) {
@@ -1018,7 +1125,7 @@ static void on_app_activate(GApplication* app, gpointer) {
     gtk_widget_set_margin_top(footer, 10);
     gtk_widget_set_margin_bottom(footer, 12);
 
-    GtkWidget* foot_info = gtk_label_new("⚡ Monolith Native Engine • Mathematical C++20 Environment");
+    GtkWidget* foot_info = gtk_label_new("Monolith Native Engine — Mathematical C++20 Environment");
     gtk_widget_add_css_class(foot_info, "dim-label");
     gtk_widget_set_hexpand(foot_info, TRUE);
     gtk_widget_set_halign(foot_info, GTK_ALIGN_START);

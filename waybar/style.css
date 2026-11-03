@@ -48,8 +48,18 @@ window#waybar {
 }
 #custom-spatial_tab.tab-desktop {
     background: #0f0f10;
-    border-color: #27272a;
+    color: #d4d4d8;
+}
+
+#window {
+    color: #71717a;
+    font-weight: 500;
+}
+
+#clock {
     color: #e4e4e7;
+    font-weight: 700;
+    letter-spacing: 0.5px;
 }
 
 #custom-drawer_toggle {
@@ -66,37 +76,44 @@ window#waybar {
     color: #ffffff;
 }
 
-#idle_inhibitor {
+#idle_inhibitor,
+#bluetooth,
+#network,
+#pulseaudio,
+#backlight,
+#battery,
+#cpu,
+#memory,
+#custom-nightlight,
+#custom-settings,
+#custom-notification,
+#custom-power {
     padding: 0 6px;
-    color: #71717a;
-}
-#idle_inhibitor.activated {
-    color: #f59e0b;
-    background: #231b0e;
+    margin: 2px 1px;
+    color: #e4e4e7;
+    border-radius: 2px;
 }
 
-#bluetooth {
-    padding: 0 6px;
-    color: #71717a;
+#idle_inhibitor:hover,
+#bluetooth:hover,
+#network:hover,
+#pulseaudio:hover,
+#backlight:hover,
+#battery:hover,
+#cpu:hover,
+#memory:hover,
+#custom-nightlight:hover,
+#custom-settings:hover,
+#custom-notification:hover,
+#custom-power:hover {
+    background: #18181b;
+    color: #ffffff;
 }
-#bluetooth.connected {
-    color: #38bdf8;
-}
-#bluetooth.disabled {
-    color: #3f3f46;
-}
-
-#clock, #battery, #cpu, #memory, #network, #pulseaudio, #backlight, #custom-nightlight, #custom-settings, #custom-notification, #custom-power {
-    padding: 0 7px;
-    color: #d4d4d8;
-}
-#battery.warning { color: #f59e0b; }
-#battery.critical { color: #ef4444; }
 
 tooltip {
     background: #000000;
     border: 1px solid #27272a;
-    border-radius: 2px;
+    border-radius: 4px;
 }
 tooltip label {
     font-family: "JetBrains Mono", monospace;

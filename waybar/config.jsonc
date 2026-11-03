@@ -2,28 +2,28 @@
   "backlight": {
     "format": "{icon} {percent}%",
     "format-icons": [
-      "\udb80\udcde",
-      "\udb80\udcdf",
-      "\udb80\udce0"
+      "󰃞",
+      "󰃟",
+      "󰃠"
     ],
     "scroll-step": 2
   },
   "battery": {
     "format": "{icon} {capacity}%",
-    "format-charging": "\udb80\udc84 {capacity}%",
+    "format-charging": "󰂄 {capacity}%",
     "format-icons": [
-      "\udb80\udc7a",
-      "\udb80\udc7b",
-      "\udb80\udc7c",
-      "\udb80\udc7d",
-      "\udb80\udc7e",
-      "\udb80\udc7f",
-      "\udb80\udc80",
-      "\udb80\udc81",
-      "\udb80\udc82",
-      "\udb80\udc79"
+      "󰁺",
+      "󰁻",
+      "󰁼",
+      "󰁽",
+      "󰁾",
+      "󰁿",
+      "󰂀",
+      "󰂁",
+      "󰂂",
+      "󰁹"
     ],
-    "format-plugged": "\udb80\udc84 {capacity}%",
+    "format-plugged": "󰂄 {capacity}%",
     "interval": 10,
     "states": {
       "critical": 10,
@@ -31,14 +31,14 @@
     }
   },
   "bluetooth": {
-    "format": "\udb80\udcaf",
-    "format-connected": "\udb80\udcb1 {device_alias}",
-    "format-connected-battery": "\udb80\udcb1 {device_alias} {device_battery_percentage}%",
-    "format-disabled": "\udb80\udcb2",
+    "format": "󰂯",
+    "format-connected": "󰂱 {device_alias}",
+    "format-connected-battery": "󰂱 {device_alias} {device_battery_percentage}%",
+    "format-disabled": "󰂲",
     "on-click": "monolith-popup bluetooth",
     "tooltip-format": "{controller_alias}\t{controller_address}\n{num_connections} connected devices",
     "tooltip-format-connected": "{controller_alias}\t{controller_address}\n{num_connections} connected devices\n\n{device_enumerate}",
-    "tooltip-format-enumerate-connected": "\u25cf {device_alias}\t{device_address}"
+    "tooltip-format-enumerate-connected": "● {device_alias}\t{device_address}"
   },
   "clock": {
     "format": "{:%H:%M:%S}",
@@ -47,37 +47,37 @@
     "tooltip": false
   },
   "cpu": {
-    "format": "\udb80\udf5b {usage}%",
+    "format": "󰍛 {usage}%",
     "interval": 3,
     "on-click": "monolith-popup system"
   },
   "custom/drawer_toggle": {
-    "format": "\udb81\udc03",
-    "tooltip": "System Drawer [Pinned] (Click to collapse)",
-    "on-click": "~/.config/monolith/scripts/drawer-toggle.sh"
+    "format": "󰐃",
+    "on-click": "/home/boski/.config/monolith/scripts/drawer-toggle.sh",
+    "tooltip": "System Drawer [Pinned] (Click to collapse)"
   },
   "custom/menu": {
-    "format": "\udb82\udcc7",
+    "format": "󰣇",
     "on-click": "pkill fuzzel || fuzzel --config ~/.config/monolith/fuzzel/fuzzel.ini",
     "tooltip": "Application Menu (SUPER)"
   },
   "custom/nightlight": {
-    "format": "\udb80\udcdd",
+    "format": "󰃝",
     "on-click": "~/.config/monolith/scripts/nightlight.sh",
     "tooltip": "Toggle Night Light (Hyprsunset)"
   },
   "custom/notification": {
-    "format": "\udb80\udc9a",
+    "format": "󰂚",
     "on-click": "swaync-client -t -sw",
     "tooltip": "Notifications (SwayNC)"
   },
   "custom/power": {
-    "format": "\udb81\udc25",
+    "format": "󰐥",
     "on-click": "monolith-popup power",
     "tooltip": "Power Menu"
   },
   "custom/settings": {
-    "format": "\udb81\udc93",
+    "format": "󰒓",
     "on-click": "monolith-settings",
     "tooltip": "Monolith Settings (SUPER+I)"
   },
@@ -91,12 +91,11 @@
     "signal": 8
   },
   "group/drawer": {
-    "orientation": "horizontal",
     "drawer": {
-      "transition-duration": 200,
       "children-class": "drawer-child",
-      "transition-left-to-right": false,
-      "click-to-reveal": false
+      "click-to-reveal": false,
+      "transition-duration": 200,
+      "transition-left-to-right": false
     },
     "modules": [
       "custom/drawer_toggle",
@@ -109,18 +108,19 @@
       "cpu",
       "memory",
       "custom/nightlight"
-    ]
+    ],
+    "orientation": "horizontal"
   },
   "height": 33,
   "hyprland/window": {
-    "format": "\u2502  {title}",
+    "format": "│  {title}",
     "max-length": 40,
     "rewrite": {
-      "(.*) - Chromium": "\udb80\udeaf $1",
-      "(.*) - Zen Browser": "\udb80\ude39 $1",
-      "(.*) \u2014 Mozilla Firefox": "\udb80\ude39 $1",
+      "(.*) - Chromium": "󰊯 $1",
+      "(.*) - Zen Browser": "󰈹 $1",
+      "(.*) — Mozilla Firefox": "󰈹 $1",
       "^$": "",
-      "foot": "\uf120 Terminal"
+      "foot": " Terminal"
     },
     "separate-outputs": true
   },
@@ -133,8 +133,8 @@
   "idle_inhibitor": {
     "format": "{icon}",
     "format-icons": {
-      "activated": "\udb80\ude08 AWAKE",
-      "deactivated": "\udb80\ude09"
+      "activated": "󰈈 AWAKE",
+      "deactivated": "󰈉"
     },
     "tooltip": true,
     "tooltip-format-activated": "Keep Awake: ACTIVE (Screen & sleep inhibited)",
@@ -146,7 +146,7 @@
   "margin-right": 0,
   "margin-top": 0,
   "memory": {
-    "format": "\udb81\ude1a {used:0.1f}G",
+    "format": "󰘚 {used:0.1f}G",
     "interval": 5,
     "on-click": "monolith-popup system",
     "tooltip-format": "Used: {used:0.2f} GiB / {total:0.2f} GiB ({percentage}%)"
@@ -175,10 +175,10 @@
     "custom/power"
   ],
   "network": {
-    "format-disconnected": "\udb81\uddaa off",
-    "format-ethernet": "\udb80\ude00 {ifname}",
-    "format-linked": "\udb80\ude00 link",
-    "format-wifi": "\udb81\udda9 {essid}",
+    "format-disconnected": "󰖪 off",
+    "format-ethernet": "󰈀 {ifname}",
+    "format-linked": "󰈀 link",
+    "format-wifi": "󰖩 {essid}",
     "interval": 5,
     "on-click": "monolith-popup network",
     "tooltip-format": "{ifname} via {gwaddr} ({signalStrength}%)"
@@ -188,15 +188,15 @@
     "format": "{icon} {volume}%",
     "format-icons": {
       "default": [
-        "\udb81\udd7f",
-        "\udb81\udd80",
-        "\udb81\udd7e"
+        "󰕿",
+        "󰖀",
+        "󰕾"
       ],
-      "hands-free": "\udb80\udecb",
-      "headphone": "\udb80\udecb",
-      "headset": "\udb80\udecb"
+      "hands-free": "󰋋",
+      "headphone": "󰋋",
+      "headset": "󰋋"
     },
-    "format-muted": "\udb81\udd81 mut",
+    "format-muted": "󰖁 mut",
     "on-click": "monolith-popup audio",
     "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
     "scroll-step": 2

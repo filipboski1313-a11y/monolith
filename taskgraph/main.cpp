@@ -1229,7 +1229,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         }
         cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
         cairo_move_to(cr, mx + 16.0, y1 + 20.0);
-        std::string pin_str = node.is_pinned ? "📌  Unpin from Task Graph" : "📌  Pin to Task Graph";
+        std::string pin_str = node.is_pinned ? "Unpin from Task Graph" : "Pin to Task Graph";
         cairo_show_text(cr, pin_str.c_str());
 
         // Item 2: Load to RAM
@@ -1242,10 +1242,10 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         cairo_move_to(cr, mx + 16.0, y2 + 20.0);
         if (node.load_to_ram) {
             cairo_set_source_rgba(cr, 0.95, 0.95, 0.98, 1.0);
-            cairo_show_text(cr, "⚡  Load to RAM: [ ENABLED ✓ ]");
+            cairo_show_text(cr, "Load to RAM: [ ENABLED ]");
         } else {
             cairo_set_source_rgba(cr, 0.65, 0.65, 0.68, 0.85);
-            cairo_show_text(cr, "⚡  Load to RAM: [ DISABLED ✗ ]");
+            cairo_show_text(cr, "Load to RAM: [ DISABLED ]");
         }
     }
 }
