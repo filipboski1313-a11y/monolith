@@ -98,6 +98,10 @@ struct OutputWindow {
     int height = 1080;
     cairo_surface_t* bg_surface = nullptr;
 
+    double scale = 1.0;
+    double scale_osd_alpha = 0.0;
+    std::string scale_osd_text;
+
     // Per-output isolated simulation & interaction state
     std::vector<AppNode> nodes;
     std::vector<AppEdge> edges;
@@ -111,7 +115,7 @@ struct OutputWindow {
     int menu_node_idx = -1;
     double menu_x = 0.0;
     double menu_y = 0.0;
-    double menu_w = 276.0;
+    double menu_w = 286.0;
     double menu_h = 198.0;
     int menu_hovered_item = -1;
 
@@ -152,6 +156,8 @@ struct GraphState {
     double repulsion_radius = 620.0;
     double fuzzel_repulsion = 450.0;
     bool auto_freeze = true;
+    double base_scale = 1.0;
+    std::unordered_map<std::string, double> monitor_scales;
 
     // Procedural gradient & grain parameters
     std::string gradient_type = "diagonal_up";
@@ -200,6 +206,47 @@ static void wake_all_outputs_physics(double new_alpha = 0.65) {
 static void exec_bg(const std::string& cmd) {
     std::string full = cmd + " > /dev/null 2>&1 &";
     system(full.c_str());
+}
+
+static bool case_insensitive_contains(const std::string& haystack, const std::string& needle) {
+    if (needle.empty() || haystack.empty()) return false;
+    auto it = std::search(
+        haystack.begin(), haystack.end(),
+        needle.begin(), needle.end(),
+        [](char ch1, char ch2) {
+            return std::tolower(static_cast<unsigned char>(ch1)) == std::tolower(static_cast<unsigned char>(ch2));
+        }
+    );
+    return (it != haystack.end());
+}
+
+static std::string resolve_app_command(const std::string& app_id, const std::string& raw_cmd) {
+    std::string id_lower = app_id;
+    std::transform(id_lower.begin(), id_lower.end(), id_lower.begin(), [](unsigned char c){ return std::tolower(c); });
+
+    // Known application smart fallbacks for cross-distro compatibility (Fedora / Arch / Ubuntu)
+    if (id_lower == "obsidian") {
+        return "(command -v flatpak >/dev/null 2>&1 && flatpak info md.obsidian.Obsidian >/dev/null 2>&1 && flatpak run md.obsidian.Obsidian) || (command -v obsidian >/dev/null 2>&1 && exec obsidian) || obsidian";
+    }
+    if (id_lower == "vesktop" || id_lower == "discord") {
+        return "(command -v vesktop >/dev/null 2>&1 && exec vesktop) || (command -v flatpak >/dev/null 2>&1 && flatpak info dev.vencord.Vesktop >/dev/null 2>&1 && flatpak run dev.vencord.Vesktop) || (command -v discord >/dev/null 2>&1 && exec discord) || discord";
+    }
+    if (id_lower == "spotify") {
+        return "(test -x \"$HOME/.local/bin/spotify\" && exec \"$HOME/.local/bin/spotify\") || (command -v spotify >/dev/null 2>&1 && exec spotify) || (command -v flatpak >/dev/null 2>&1 && flatpak info com.spotify.Client >/dev/null 2>&1 && flatpak run com.spotify.Client) || spotify";
+    }
+    if (id_lower == "caprine") {
+        return "(command -v flatpak >/dev/null 2>&1 && flatpak info com.sindresorhus.Caprine >/dev/null 2>&1 && flatpak run com.sindresorhus.Caprine) || (command -v caprine >/dev/null 2>&1 && exec caprine) || caprine";
+    }
+    if (id_lower == "signal") {
+        return "(command -v flatpak >/dev/null 2>&1 && flatpak info org.signal.Signal >/dev/null 2>&1 && flatpak run org.signal.Signal) || (command -v signal-desktop >/dev/null 2>&1 && exec signal-desktop) || signal-desktop";
+    }
+    if (id_lower == "localsend") {
+        return "(command -v flatpak >/dev/null 2>&1 && flatpak info org.localsend.localsend_app >/dev/null 2>&1 && flatpak run org.localsend.localsend_app) || (command -v localsend >/dev/null 2>&1 && exec localsend) || localsend";
+    }
+    if (raw_cmd.empty()) {
+        return app_id;
+    }
+    return raw_cmd;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -313,13 +360,19 @@ static void init_output_nodes(OutputWindow* out, bool preserve_positions = false
     out->nodes.clear();
     out->edges.clear();
 
+    if (g_graph.monitor_scales.count(out->name)) {
+        out->scale = g_graph.monitor_scales[out->name];
+    } else {
+        out->scale = g_graph.base_scale;
+    }
+
     size_t count = g_graph.pinned_templates.size();
     if (count == 0) return;
 
     double cx = out->width / 2.0;
     double cy = out->height / 2.0;
-    double rx = std::clamp(cx * 0.44, 250.0, 560.0);
-    double ry = std::clamp(cy * 0.48, 170.0, 340.0);
+    double rx = std::clamp(cx * 0.44, 250.0, 560.0) * out->scale;
+    double ry = std::clamp(cy * 0.48, 170.0, 340.0) * out->scale;
 
     for (size_t i = 0; i < count; ++i) {
         const auto& tmpl = g_graph.pinned_templates[i];
@@ -396,6 +449,13 @@ static void save_config() {
             item["load_to_ram"] = tmpl.load_to_ram;
             j["pinned"].push_back(item);
         }
+        j["scale"] = g_graph.base_scale;
+        json ms_obj = json::object();
+        for (const auto& [mon_name, mon_sc] : g_graph.monitor_scales) {
+            ms_obj[mon_name] = mon_sc;
+        }
+        j["monitor_scales"] = ms_obj;
+
         j["physics"] = {
             {"repulsion", g_graph.repulsion},
             {"spring_k", g_graph.spring_k},
@@ -421,6 +481,15 @@ static void load_config(bool preserve_positions = false) {
     try {
         json j;
         f >> j;
+
+        g_graph.base_scale = j.value("scale", 1.0);
+        if (j.contains("monitor_scales") && j["monitor_scales"].is_object()) {
+            for (auto it = j["monitor_scales"].begin(); it != j["monitor_scales"].end(); ++it) {
+                if (it.value().is_number()) {
+                    g_graph.monitor_scales[it.key()] = it.value().get<double>();
+                }
+            }
+        }
 
         g_graph.pinned_templates.clear();
         g_graph.template_edges.clear();
@@ -512,6 +581,16 @@ static void load_monolith_settings() {
             g_graph.repulsion_radius = tg.value("repulsion_radius", g_graph.repulsion_radius);
             g_graph.fuzzel_repulsion = tg.value("fuzzel_repulsion", g_graph.fuzzel_repulsion);
             g_graph.auto_freeze = tg.value("auto_freeze", g_graph.auto_freeze);
+            if (tg.contains("scale") && tg["scale"].is_number()) {
+                g_graph.base_scale = tg.value("scale", 1.0);
+            }
+            if (tg.contains("monitor_scales") && tg["monitor_scales"].is_object()) {
+                for (auto it = tg["monitor_scales"].begin(); it != tg["monitor_scales"].end(); ++it) {
+                    if (it.value().is_number()) {
+                        g_graph.monitor_scales[it.key()] = it.value().get<double>();
+                    }
+                }
+            }
 
             for (auto* out : g_graph.outputs) {
                 if (!out) continue;
@@ -582,7 +661,7 @@ static std::string format_ws_badge(int ws_id, const std::string& ws_name) {
     if (ws_name.find("extra") != std::string::npos) return "E";
     if (ws_name.find("ramvault") != std::string::npos) return "V";
     if (ws_id > 0) return "W" + std::to_string(ws_id);
-    return "•";
+    return "-";
 }
 
 static void check_desktop_state() {
@@ -689,8 +768,8 @@ static void check_desktop_state() {
                         std::string cls = c.value("class", "");
                         std::string addr = c.value("address", "");
                         if (!n.match_class.empty() && (strcasecmp(cls.c_str(), n.match_class.c_str()) == 0 ||
-                            cls.find(n.match_class) != std::string::npos ||
-                            n.match_class.find(cls) != std::string::npos)) {
+                            case_insensitive_contains(cls, n.match_class) ||
+                            case_insensitive_contains(n.match_class, cls))) {
                             n.is_running = true;
                             n.hypr_address = addr;
                             int cws = c.value("workspace", json::object()).value("id", 1);
@@ -1006,13 +1085,14 @@ static void update_physics_for_output(OutputWindow* out) {
             double dy = node.y - out->nodes[j].y;
             double d = std::hypot(dx, dy) + 0.001;
 
-            if (d < 750.0) {
-                double rep = (g_graph.repulsion * 1.8) / (d * d + 400.0);
+            double rep_dist = 750.0 * out->scale;
+            if (d < rep_dist) {
+                double rep = (g_graph.repulsion * 1.8 * out->scale) / (d * d + 400.0);
                 fx += (dx / d) * rep;
                 fy += (dy / d) * rep;
             }
 
-            const double personal_bubble = 180.0;
+            const double personal_bubble = 180.0 * out->scale;
             if (d < personal_bubble) {
                 double u = (personal_bubble - d) / personal_bubble;
                 double cushion_push = u * u * (3.0 - 2.0 * u) * 26.0;
@@ -1033,7 +1113,7 @@ static void update_physics_for_output(OutputWindow* out) {
                         double dx = other.x - node.x;
                         double dy = other.y - node.y;
                         double d = std::hypot(dx, dy) + 0.1;
-                        double rlen = (e.rest_length > 0) ? e.rest_length : g_graph.rest_length;
+                        double rlen = ((e.rest_length > 0) ? e.rest_length : g_graph.rest_length) * out->scale;
                         double diff = d - rlen;
                         double f = diff * (g_graph.spring_k * spring_mult);
                         fx += (dx / d) * f;
@@ -1050,12 +1130,13 @@ static void update_physics_for_output(OutputWindow* out) {
         }
 
         // 5. Screen Boundary Cushion Field
-        double pad_x = node.radius + 36.0;
-        double pad_y_top = node.radius + 50.0;
-        double pad_y_bot = node.radius + 38.0;
+        double cur_r = node.radius * out->scale;
+        double pad_x = cur_r + 36.0;
+        double pad_y_top = cur_r + 50.0;
+        double pad_y_bot = cur_r + 38.0;
 
-        double margin_x = 180.0;
-        double margin_y = 130.0;
+        double margin_x = 180.0 * out->scale;
+        double margin_y = 130.0 * out->scale;
 
         double dist_left = node.x - pad_x;
         if (dist_left < margin_x) {
@@ -1179,8 +1260,8 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         double dx = n2->x - n1->x;
         double dy = n2->y - n1->y;
         double dist = std::hypot(dx, dy);
-        double r1 = n1->radius * n1->cur_scale + 2.0;
-        double r2 = n2->radius * n2->cur_scale + 2.0;
+        double r1 = n1->radius * n1->cur_scale * out->scale + 2.0;
+        double r2 = n2->radius * n2->cur_scale * out->scale + 2.0;
 
         if (dist <= r1 + r2 + 4.0) continue;
 
@@ -1196,14 +1277,14 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
 
         if (is_highlighted) {
             cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.88);
-            cairo_set_line_width(cr, g_graph.edge_width + 0.5);
+            cairo_set_line_width(cr, (g_graph.edge_width + 0.5) * out->scale);
         } else if (both_running) {
             cairo_set_source_rgba(cr, 0.85, 0.85, 0.90, std::min(0.80, g_graph.edge_alpha + 0.20));
-            cairo_set_line_width(cr, g_graph.edge_width + 0.15);
+            cairo_set_line_width(cr, (g_graph.edge_width + 0.15) * out->scale);
         } else {
-            double dist_fade = std::clamp(1.0 - (dist / 680.0), 0.25, 1.0);
+            double dist_fade = std::clamp(1.0 - (dist / (680.0 * out->scale)), 0.25, 1.0);
             cairo_set_source_rgba(cr, 0.72, 0.72, 0.78, g_graph.edge_alpha * dist_fade);
-            cairo_set_line_width(cr, g_graph.edge_width);
+            cairo_set_line_width(cr, g_graph.edge_width * out->scale);
         }
 
         cairo_move_to(cr, sx, sy);
@@ -1225,7 +1306,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
     cairo_select_font_face(cr, "JetBrains Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
 
     for (const auto& node : out->nodes) {
-        double r = node.radius * node.cur_scale;
+        double r = node.radius * node.cur_scale * out->scale;
         cairo_new_path(cr);
 
         // Soft radial aura behind hovered or running nodes
@@ -1243,9 +1324,9 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         // Running outer orbital ring
         if (node.is_running) {
             cairo_new_sub_path(cr);
-            cairo_arc(cr, node.x, node.y, r + 4.5, 0, 2 * M_PI);
+            cairo_arc(cr, node.x, node.y, r + 4.5 * out->scale, 0, 2 * M_PI);
             cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, node.is_hovered ? 0.60 : 0.30);
-            cairo_set_line_width(cr, 1.0);
+            cairo_set_line_width(cr, 1.0 * out->scale);
             cairo_stroke(cr);
         }
 
@@ -1264,13 +1345,13 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         // Precision perimeter rim
         if (node.is_hovered || node.is_dragged) {
             cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-            cairo_set_line_width(cr, 1.7);
+            cairo_set_line_width(cr, 1.7 * out->scale);
         } else if (node.is_running) {
             cairo_set_source_rgba(cr, 0.92, 0.92, 0.96, 0.85);
-            cairo_set_line_width(cr, 1.3);
+            cairo_set_line_width(cr, 1.3 * out->scale);
         } else {
             cairo_set_source_rgba(cr, 0.32, 0.32, 0.38, 0.72);
-            cairo_set_line_width(cr, 1.1);
+            cairo_set_line_width(cr, 1.1 * out->scale);
         }
         cairo_stroke(cr);
 
@@ -1281,8 +1362,9 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
 
             cairo_save(cr);
             cairo_translate(cr, node.x, node.y);
-            if (node.cur_scale != 1.0) {
-                cairo_scale(cr, node.cur_scale, node.cur_scale);
+            double iscale = node.cur_scale * out->scale;
+            if (iscale != 1.0) {
+                cairo_scale(cr, iscale, iscale);
             }
             gdk_cairo_set_source_pixbuf(cr, node.pixbuf, -icon_w / 2.0, -icon_h / 2.0);
             cairo_paint_with_alpha(cr, (node.is_running || node.is_hovered) ? 1.0 : 0.88);
@@ -1294,30 +1376,30 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
             double bx = node.x + r * 0.72;
             double by = node.y - r * 0.72;
             cairo_new_sub_path(cr);
-            cairo_arc(cr, bx, by, 5.2, 0, 2 * M_PI);
+            cairo_arc(cr, bx, by, 5.2 * out->scale, 0, 2 * M_PI);
             cairo_set_source_rgb(cr, 0.03, 0.03, 0.04);
             cairo_fill_preserve(cr);
             cairo_set_source_rgba(cr, 0.13, 0.77, 0.37, 0.95);
-            cairo_set_line_width(cr, 1.2);
+            cairo_set_line_width(cr, 1.2 * out->scale);
             cairo_stroke(cr);
 
             cairo_new_sub_path(cr);
-            cairo_arc(cr, bx, by, 2.5, 0, 2 * M_PI);
+            cairo_arc(cr, bx, by, 2.5 * out->scale, 0, 2 * M_PI);
             cairo_set_source_rgb(cr, 0.29, 0.87, 0.50);
             cairo_fill(cr);
         }
 
-        // Top-Left Badge: Workspace Indicator (W1..W9, S, E)
+        // Top-Left Badge: Workspace Indicator (W1..W9, S, E, V)
         if (node.is_running && !node.workspace_label.empty()) {
-            cairo_set_font_size(cr, 8.0);
+            cairo_set_font_size(cr, std::clamp(8.0 * out->scale, 6.5, 13.0));
             cairo_text_extents_t wext;
             cairo_text_extents(cr, node.workspace_label.c_str(), &wext);
-            double bw = std::max(14.0, wext.width + 7.0);
-            double bh = 12.0;
+            double bw = std::max(14.0 * out->scale, wext.width + 7.0 * out->scale);
+            double bh = 12.0 * out->scale;
             double bx = node.x - r * 0.80 - bw / 2.0;
             double by = node.y - r * 0.80 - bh / 2.0;
 
-            draw_rounded_rect(cr, bx, by, bw, bh, 3.5);
+            draw_rounded_rect(cr, bx, by, bw, bh, 3.5 * out->scale);
             if (node.workspace_label == "S" || node.workspace_label == "V") {
                 cairo_set_source_rgb(cr, 0.04, 0.14, 0.08);
             } else if (node.workspace_label == "E") {
@@ -1334,7 +1416,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
             } else {
                 cairo_set_source_rgba(cr, 0.75, 0.75, 0.82, 0.85);
             }
-            cairo_set_line_width(cr, 1.0);
+            cairo_set_line_width(cr, 1.0 * out->scale);
             cairo_stroke(cr);
 
             cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
@@ -1343,22 +1425,22 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         }
 
         // Bottom Label Pill
-        cairo_set_font_size(cr, 9.5);
+        cairo_set_font_size(cr, std::clamp(9.5 * out->scale, 7.5, 15.0));
         cairo_text_extents_t ext;
         cairo_text_extents(cr, node.name.c_str(), &ext);
         double tx = node.x - ext.width / 2.0;
-        double ty = node.y + r + 15.0;
+        double ty = node.y + r + 15.0 * out->scale;
 
-        double pw = ext.width + 12.0;
-        double ph = ext.height + 6.0;
+        double pw = ext.width + 12.0 * out->scale;
+        double ph = ext.height + 6.0 * out->scale;
         double px = node.x - pw / 2.0;
-        double py = ty - ext.height - 3.0;
+        double py = ty - ext.height - 3.0 * out->scale;
 
-        draw_rounded_rect(cr, px, py, pw, ph, 4.0);
+        draw_rounded_rect(cr, px, py, pw, ph, 4.0 * out->scale);
         cairo_set_source_rgba(cr, 0.02, 0.02, 0.03, 0.92);
         cairo_fill_preserve(cr);
         cairo_set_source_rgba(cr, 0.16, 0.16, 0.20, node.is_hovered ? 0.95 : 0.65);
-        cairo_set_line_width(cr, 1.0);
+        cairo_set_line_width(cr, 1.0 * out->scale);
         cairo_stroke(cr);
 
         if (node.is_hovered || node.is_running) {
@@ -1419,27 +1501,106 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
             cairo_show_text(cr, label.c_str());
         };
 
-        std::string item0_lbl = (node.workspace_label == "V") ? "⚡  Instant Launch (RAM Vault)" : (node.is_running ? "▶  Focus Window" : "▶  Launch Application");
+        std::string item0_lbl = (node.workspace_label == "V") ? "[!] Instant Launch (RAM Vault)" : (node.is_running ? "[>] Focus Window" : "[>] Launch Application");
         draw_menu_row(0, item0_lbl, 1.0, 1.0, 1.0);
 
         if (node.is_running) {
             bool in_extra = (node.workspace_label == "E");
-            draw_menu_row(1, in_extra ? "▲  Restore from Extra Shelf" : "▼  Stash to Extra Shelf", 0.96, 0.72, 0.25);
+            draw_menu_row(1, in_extra ? "[^] Restore from Extra Shelf" : "[v] Stash to Extra Shelf", 0.96, 0.72, 0.25);
         } else {
-            draw_menu_row(1, "+  Launch Fresh Instance", 0.82, 0.82, 0.86);
+            draw_menu_row(1, "[+] Launch Fresh Instance", 0.82, 0.82, 0.86);
         }
 
-        draw_menu_row(2, node.is_pinned ? "✕  Unpin from Constellation" : "★  Pin to Constellation", 0.88, 0.88, 0.92);
+        draw_menu_row(2, node.is_pinned ? "[-] Unpin from Constellation" : "[+] Pin to Constellation", 0.88, 0.88, 0.92);
 
         if (node.load_to_ram) {
-            draw_menu_row(3, "●  RAM Cache: [ RESIDENT ]", 0.29, 0.87, 0.50);
+            draw_menu_row(3, "[*] RAM Cache: [ RESIDENT ]", 0.29, 0.87, 0.50);
         } else {
-            draw_menu_row(3, "○  Load to RAM: [ DISABLED ]", 0.65, 0.65, 0.70);
+            draw_menu_row(3, "[ ] Load to RAM: [ DISABLED ]", 0.65, 0.65, 0.70);
         }
 
         if (node.is_running) {
-            draw_menu_row(4, "■  Close Running Window", 0.97, 0.44, 0.44);
+            draw_menu_row(4, "[x] Close Running Window", 0.97, 0.44, 0.44);
         }
+    } else if (out->menu_open && out->menu_node_idx == -2) {
+        int num_items = 4;
+        double item_h = 30.0;
+        double menu_h = 44.0 + num_items * (item_h + 2.0) + 6.0;
+        out->menu_h = menu_h;
+        out->menu_w = 296.0;
+
+        double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
+        double my = std::clamp(out->menu_y, 42.0, out->height - menu_h - 15.0);
+
+        draw_rounded_rect(cr, mx, my, out->menu_w, menu_h, 8.0);
+        cairo_set_source_rgba(cr, 0.03, 0.03, 0.04, 0.98);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 0.28, 0.28, 0.34, 0.95);
+        cairo_set_line_width(cr, 1.2);
+        cairo_stroke(cr);
+
+        // Header
+        cairo_select_font_face(cr, "JetBrains Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 11.0);
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_move_to(cr, mx + 14.0, my + 24.0);
+        std::string header = out->name + " CONSTELLATION [" + std::to_string(static_cast<int>(std::round(out->scale * 100))) + "%]";
+        cairo_show_text(cr, header.c_str());
+
+        cairo_set_source_rgba(cr, 0.18, 0.18, 0.22, 0.90);
+        cairo_set_line_width(cr, 1.0);
+        cairo_move_to(cr, mx + 10.0, my + 34.0);
+        cairo_line_to(cr, mx + out->menu_w - 10.0, my + 34.0);
+        cairo_stroke(cr);
+
+        double start_y = my + 40.0;
+        cairo_set_font_size(cr, 10.5);
+
+        auto draw_menu_row = [&](int idx, const std::string& label, double r_col, double g_col, double b_col) {
+            double ry = start_y + idx * (item_h + 2.0);
+            if (out->menu_hovered_item == idx) {
+                draw_rounded_rect(cr, mx + 6.0, ry, out->menu_w - 12.0, item_h, 5.0);
+                cairo_set_source_rgba(cr, 0.16, 0.16, 0.20, 0.95);
+                cairo_fill(cr);
+            }
+            cairo_set_source_rgb(cr, r_col, g_col, b_col);
+            cairo_move_to(cr, mx + 14.0, ry + 19.5);
+            cairo_show_text(cr, label.c_str());
+        };
+
+        draw_menu_row(0, "[+] Enlarge Constellation (+10%)", 0.92, 0.92, 0.95);
+        draw_menu_row(1, "[-] Shrink Constellation (-10%)", 0.92, 0.92, 0.95);
+        draw_menu_row(2, "[0] Reset Constellation (100%)", 0.82, 0.82, 0.86);
+        draw_menu_row(3, "[*] Recenter Orbit Layout", 0.70, 0.85, 1.0);
+    }
+
+    // ──────────────── 4. TRANSIENT SCALE OSD HUD ─────────────────────────────
+    if (out->scale_osd_alpha > 0.01) {
+        cairo_save(cr);
+        double a = std::min(1.0, out->scale_osd_alpha);
+        std::string osd = out->scale_osd_text;
+        cairo_select_font_face(cr, "JetBrains Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 11.5);
+        cairo_text_extents_t te;
+        cairo_text_extents(cr, osd.c_str(), &te);
+        double bw = te.width + 36.0;
+        double bh = 34.0;
+        double bx = (out->width - bw) / 2.0;
+        double by = 48.0;
+
+        draw_rounded_rect(cr, bx, by, bw, bh, 6.0);
+        cairo_set_source_rgba(cr, 0.04, 0.04, 0.06, 0.94 * a);
+        cairo_fill_preserve(cr);
+        cairo_set_source_rgba(cr, 0.35, 0.35, 0.42, 0.88 * a);
+        cairo_set_line_width(cr, 1.2);
+        cairo_stroke(cr);
+
+        cairo_set_source_rgba(cr, 0.95, 0.95, 0.98, a);
+        cairo_move_to(cr, bx + 18.0, by + 21.5);
+        cairo_show_text(cr, osd.c_str());
+        cairo_restore(cr);
+
+        out->scale_osd_alpha = std::max(0.0, out->scale_osd_alpha - 0.025);
     }
 }
 
@@ -1452,7 +1613,7 @@ static int hit_test_node(OutputWindow* out, double x, double y) {
         const auto& n = out->nodes[i];
         double dx = x - n.x;
         double dy = y - n.y;
-        double hit_r = n.radius * n.cur_scale + 6.0;
+        double hit_r = n.radius * n.cur_scale * out->scale + 6.0;
         if (dx * dx + dy * dy <= hit_r * hit_r) {
             return i;
         }
@@ -1474,9 +1635,10 @@ static void focus_or_launch_node(const AppNode& node) {
         } else {
             HyprIPC::dispatch("focuswindow address:" + node.hypr_address);
         }
-    } else if (!node.exec_cmd.empty()) {
+    } else if (!node.exec_cmd.empty() || !node.id.empty()) {
+        std::string launch_cmd = resolve_app_command(node.id, node.exec_cmd);
         exec_bg("monolith-ram-preloader boost 3.5");
-        exec_bg(node.exec_cmd);
+        HyprIPC::dispatch("exec sh -c \"" + launch_cmd + "\"");
     }
 }
 
@@ -1507,8 +1669,9 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
                         HyprIPC::dispatch("movetoworkspacesilent special:extra,address:" + target_node.hypr_address);
                     }
                     check_desktop_state();
-                } else if (!target_node.exec_cmd.empty()) {
-                    exec_bg(target_node.exec_cmd);
+                } else if (!target_node.exec_cmd.empty() || !target_node.id.empty()) {
+                    std::string launch_cmd = resolve_app_command(target_node.id, target_node.exec_cmd);
+                    HyprIPC::dispatch("exec sh -c \"" + launch_cmd + "\"");
                 }
             } else if (clicked_item == 2) {
                 target_node.is_pinned = !target_node.is_pinned;
@@ -1594,6 +1757,50 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
         }
     }
 
+    if (out->menu_open && out->menu_node_idx == -2) {
+        double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
+        double my = std::clamp(out->menu_y, 42.0, out->height - out->menu_h - 15.0);
+
+        if (start_x >= mx && start_x <= mx + out->menu_w && start_y >= my + 40.0 && start_y <= my + out->menu_h) {
+            int clicked_item = static_cast<int>((start_y - (my + 40.0)) / 32.0);
+            if (clicked_item == 0) {
+                out->scale = std::clamp(out->scale + 0.10, 0.40, 2.50);
+            } else if (clicked_item == 1) {
+                out->scale = std::clamp(out->scale - 0.10, 0.40, 2.50);
+            } else if (clicked_item == 2) {
+                out->scale = 1.0;
+            } else if (clicked_item == 3) {
+                double cx = out->width / 2.0;
+                double cy = out->height / 2.0;
+                size_t count = out->nodes.size();
+                double rx = std::clamp(cx * 0.44, 250.0, 560.0) * out->scale;
+                double ry = std::clamp(cy * 0.48, 170.0, 340.0) * out->scale;
+                for (size_t i = 0; i < count; ++i) {
+                    double angle = (2.0 * M_PI * i) / std::max(size_t(1), count) - (M_PI / 2.0);
+                    out->nodes[i].x = cx + rx * std::cos(angle);
+                    out->nodes[i].y = cy + ry * std::sin(angle);
+                    out->nodes[i].vx = 0.0;
+                    out->nodes[i].vy = 0.0;
+                }
+            }
+
+            g_graph.monitor_scales[out->name] = out->scale;
+            out->scale_osd_alpha = 1.8;
+            out->scale_osd_text = out->name + " SCALE: " + std::to_string(static_cast<int>(std::round(out->scale * 100))) + "%";
+            save_config();
+            wake_output_physics(out, 0.7);
+            out->menu_open = false;
+            out->menu_node_idx = -1;
+            if (out->da) gtk_widget_queue_draw(out->da);
+            return;
+        } else {
+            out->menu_open = false;
+            out->menu_node_idx = -1;
+            if (out->da) gtk_widget_queue_draw(out->da);
+            return;
+        }
+    }
+
     int idx = hit_test_node(out, start_x, start_y);
     out->dragged_node_idx = idx;
     out->drag_start_x = start_x;
@@ -1652,11 +1859,36 @@ static void on_right_click(GtkGestureClick*, int, double x, double y, gpointer u
         out->menu_y = y + 12.0;
         out->menu_hovered_item = -1;
         if (out->da) gtk_widget_queue_draw(out->da);
-    } else if (out->menu_open) {
-        out->menu_open = false;
-        out->menu_node_idx = -1;
+    } else {
+        out->menu_open = true;
+        out->menu_node_idx = -2;
+        out->menu_x = x + 12.0;
+        out->menu_y = y + 12.0;
+        out->menu_hovered_item = -1;
         if (out->da) gtk_widget_queue_draw(out->da);
     }
+}
+
+static gboolean on_scroll(GtkEventControllerScroll* ctrl, double, double dy, gpointer user_data) {
+    OutputWindow* out = static_cast<OutputWindow*>(user_data);
+    if (!out) return GDK_EVENT_PROPAGATE;
+
+    GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(ctrl));
+    bool has_ctrl = (state & GDK_CONTROL_MASK) != 0;
+    bool has_super = (state & GDK_SUPER_MASK) != 0;
+
+    if (has_ctrl || has_super) {
+        double delta = (dy < 0) ? 0.05 : -0.05;
+        out->scale = std::clamp(out->scale + delta, 0.40, 2.50);
+        out->scale_osd_alpha = 1.8;
+        out->scale_osd_text = out->name + " SCALE: " + std::to_string(static_cast<int>(std::round(out->scale * 100))) + "%";
+        g_graph.monitor_scales[out->name] = out->scale;
+        save_config();
+        wake_output_physics(out, 0.5);
+        if (out->da) gtk_widget_queue_draw(out->da);
+        return GDK_EVENT_STOP;
+    }
+    return GDK_EVENT_PROPAGATE;
 }
 
 static void on_middle_click(GtkGestureClick*, int, double x, double y, gpointer user_data) {
@@ -1823,6 +2055,12 @@ static void sync_output_windows(GApplication* app) {
                 g_signal_connect(motion, "motion", G_CALLBACK(on_motion), out);
                 gtk_widget_add_controller(out->da, motion);
 
+                GtkEventController* scroll = gtk_event_controller_scroll_new(
+                    static_cast<GtkEventControllerScrollFlags>(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL | GTK_EVENT_CONTROLLER_SCROLL_DISCRETE)
+                );
+                g_signal_connect(scroll, "scroll", G_CALLBACK(on_scroll), out);
+                gtk_widget_add_controller(out->da, scroll);
+
                 rebuild_output_bg(out);
                 init_output_nodes(out, false);
                 gtk_window_present(GTK_WINDOW(out->win));
@@ -1857,7 +2095,7 @@ static gboolean on_physics_tick(gpointer) {
     bool any_active = false;
     for (auto* out : g_graph.outputs) {
         if (!out) continue;
-        bool out_active = (!out->is_covered) || out->fuzzel_active || (out->return_timer > 0.0) || (out->dragged_node_idx >= 0);
+        bool out_active = (!out->is_covered) || out->fuzzel_active || (out->return_timer > 0.0) || (out->dragged_node_idx >= 0) || (out->scale_osd_alpha > 0.01);
         if (out_active) {
             any_active = true;
             update_physics_for_output(out);

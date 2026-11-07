@@ -1,4 +1,10 @@
 {
+  "scale": 1.0,
+  "monitor_scales": {
+    "DP-1": 1.0,
+    "HDMI-A-1": 1.0,
+    "eDP-1": 1.0
+  },
   "physics": {
     "center_gravity": 0.01,
     "damping": 0.9019230769230768,
