@@ -24,12 +24,12 @@
       "name": "Obsidian"
     },
     {
-      "exec": "firefox",
-      "icon": "firefox",
-      "id": "firefox",
+      "exec": "chromium-browser",
+      "icon": "chromium-browser",
+      "id": "chromium",
       "load_to_ram": false,
-      "match_class": "firefox",
-      "name": "Firefox"
+      "match_class": "chromium-browser",
+      "name": "Chromium"
     },
     {
       "exec": "foot -c ~/.config/monolith/foot/foot.ini --app-id=btop-monitor -e btop",
