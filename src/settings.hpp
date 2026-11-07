@@ -139,8 +139,9 @@ struct Settings {
 
     // Display & Monitor Output
     struct Display {
-        std::string monitor_name = "eDP-1";
-        std::string mode = "1920x1200@60.00Hz";
+        std::string primary_monitor = "";
+        std::string monitor_name = "DP-1";
+        std::string mode = "preferred";
         double scale = 1.25;
         double text_scale = 1.00;
         int cursor_size = 24;
@@ -230,6 +231,7 @@ struct Settings {
         double scale = 1.25;
         int vrr = 0;
         bool enabled = true;
+        bool connected = false;
         std::string mirror_source = "";
         std::vector<std::string> available_modes;
     };
@@ -266,14 +268,31 @@ struct Settings {
                             me.available_modes.push_back(am.get<std::string>());
                         }
                     }
-                    if (idx == 0) {
-                        disp.monitor_name = me.name;
-                        disp.scale = me.scale;
-                        disp.mode = me.mode;
-                        disp.vrr = me.vrr;
-                        monitor_description = me.description;
-                    }
+                    me.connected = true;
                     monitors_list.push_back(me);
+                }
+
+                // Match disp parameters to chosen primary monitor or default
+                bool found_prim = false;
+                if (!disp.primary_monitor.empty()) {
+                    for (const auto& me : monitors_list) {
+                        if (me.name == disp.primary_monitor) {
+                            disp.monitor_name = me.name;
+                            disp.scale = me.scale;
+                            disp.mode = me.mode;
+                            disp.vrr = me.vrr;
+                            monitor_description = me.description;
+                            found_prim = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found_prim && !monitors_list.empty()) {
+                    disp.monitor_name = monitors_list[0].name;
+                    disp.scale = monitors_list[0].scale;
+                    disp.mode = monitors_list[0].mode;
+                    disp.vrr = monitors_list[0].vrr;
+                    monitor_description = monitors_list[0].description;
                 }
             }
         } catch (...) {}
@@ -374,6 +393,7 @@ struct Settings {
 
             if (j.contains("display_settings")) {
                 auto& d = j["display_settings"];
+                disp.primary_monitor = d.value("primary_monitor", disp.primary_monitor);
                 disp.monitor_name = d.value("monitor_name", disp.monitor_name);
                 disp.mode = d.value("mode", disp.mode);
                 disp.scale = d.value("scale", disp.scale);
@@ -384,6 +404,29 @@ struct Settings {
                 disp.direct_scanout = d.value("direct_scanout", disp.direct_scanout);
                 disp.idle_timeout_min = d.value("idle_timeout_min", disp.idle_timeout_min);
                 disp.battery_limit_80 = d.value("battery_limit_80", disp.battery_limit_80);
+            }
+
+            if (disp.primary_monitor.empty()) {
+                for (const auto& me : monitors_list) {
+                    if (me.name == "DP-1" || me.mode.find("3440") != std::string::npos || me.mode.find("2560") != std::string::npos) {
+                        disp.primary_monitor = me.name;
+                        break;
+                    }
+                }
+                if (disp.primary_monitor.empty() && !monitors_list.empty()) {
+                    disp.primary_monitor = monitors_list[0].name;
+                }
+            }
+
+            for (const auto& me : monitors_list) {
+                if (me.name == disp.primary_monitor) {
+                    disp.monitor_name = me.name;
+                    disp.scale = me.scale;
+                    disp.mode = me.mode;
+                    disp.vrr = me.vrr;
+                    monitor_description = me.description;
+                    break;
+                }
             }
 
             if (j.contains("monitors") && j["monitors"].is_array()) {
@@ -411,6 +454,7 @@ struct Settings {
                         me.scale = mj.value("scale", 1.0);
                         me.vrr = mj.value("vrr", 0);
                         me.enabled = mj.value("enabled", true);
+                        me.connected = false;
                         monitors_list.push_back(me);
                     }
                 }
@@ -562,6 +606,7 @@ struct Settings {
         };
 
         j["display_settings"] = {
+            {"primary_monitor", disp.primary_monitor},
             {"monitor_name", disp.monitor_name},
             {"mode", disp.mode},
             {"scale", disp.scale},
@@ -800,6 +845,7 @@ struct Settings {
             ss << "monitor = " << disp.monitor_name << ", " << disp.mode << ", auto, " << std::fixed << std::setprecision(2) << disp.scale << "\n";
         } else {
             for (const auto& m : monitors_list) {
+                if (!m.connected) continue;
                 if (!m.enabled) {
                     ss << "monitor = " << m.name << ", disable\n";
                 } else if (m.position == "mirror" && !m.mirror_source.empty()) {
@@ -810,8 +856,50 @@ struct Settings {
                 }
             }
         }
-        ss << "monitor = , preferred, auto, 1\n\n"
-           << "xwayland {\n"
+        ss << "monitor = , preferred, auto, 1\n\n";
+
+        std::string prim = disp.primary_monitor;
+        if (prim.empty() && !monitors_list.empty()) {
+            prim = monitors_list[0].name;
+        }
+
+        std::vector<std::string> secondary_monitors;
+        for (const auto& m : monitors_list) {
+            if (m.name != prim && m.enabled && m.connected) {
+                secondary_monitors.push_back(m.name);
+            }
+        }
+
+        if (!prim.empty()) {
+            ss << "# --- Primary & Secondary Monitor Workspace Bindings ---\n";
+            if (!secondary_monitors.empty()) {
+                // Secondary (side) monitors receive initial workspace(s): e.g. Workspace 1 on left/side display
+                int ws_sec = 1;
+                for (const auto& sec_name : secondary_monitors) {
+                    ss << "# Secondary display: " << sec_name << "\n";
+                    ss << "workspace = " << ws_sec << ", monitor:" << sec_name << ", default:true\n";
+                    ws_sec++;
+                }
+
+                // Primary monitor receives workspaces starting from ws_sec up to 10
+                ss << "# Primary display: " << prim << "\n";
+                ss << "workspace = " << ws_sec << ", monitor:" << prim << ", default:true\n";
+                for (int w = ws_sec + 1; w <= 10; ++w) {
+                    ss << "workspace = " << w << ", monitor:" << prim << "\n";
+                }
+                ss << "\nexec-once = hyprctl dispatch focusmonitor " << prim << "\n";
+                ss << "exec-once = hyprctl dispatch workspace " << ws_sec << "\n\n";
+            } else {
+                ss << "# Primary display: " << prim << "\n";
+                ss << "workspace = 1, monitor:" << prim << ", default:true\n";
+                for (int w = 2; w <= 10; ++w) {
+                    ss << "workspace = " << w << ", monitor:" << prim << "\n";
+                }
+                ss << "\nexec-once = hyprctl dispatch focusmonitor " << prim << "\n\n";
+            }
+        }
+
+        ss << "xwayland {\n"
            << "    force_zero_scaling = true\n"
            << "}\n\n"
            << "debug {\n"
@@ -926,6 +1014,7 @@ struct Settings {
             batch_cmds.push_back("keyword workspace f[1], gapsout:" + std::to_string(geom.gaps_out) + ", gapsin:" + std::to_string(geom.gaps_in));
         }
         for (const auto& m : monitors_list) {
+            if (!m.connected) continue;
             if (!m.enabled) {
                 batch_cmds.push_back("keyword monitor " + m.name + ",disable");
             } else if (m.position == "mirror" && !m.mirror_source.empty()) {
@@ -933,6 +1022,27 @@ struct Settings {
             } else {
                 std::string pos = m.position.empty() ? "auto" : m.position;
                 batch_cmds.push_back("keyword monitor " + m.name + "," + m.mode + "," + pos + "," + std::to_string(m.scale));
+            }
+        }
+        if (!prim.empty()) {
+            if (!secondary_monitors.empty()) {
+                int ws_sec = 1;
+                for (const auto& sec_name : secondary_monitors) {
+                    batch_cmds.push_back("keyword workspace " + std::to_string(ws_sec) + ",monitor:" + sec_name + ",default:true");
+                    ws_sec++;
+                }
+                batch_cmds.push_back("keyword workspace " + std::to_string(ws_sec) + ",monitor:" + prim + ",default:true");
+                for (int w = ws_sec + 1; w <= 10; ++w) {
+                    batch_cmds.push_back("keyword workspace " + std::to_string(w) + ",monitor:" + prim);
+                }
+                batch_cmds.push_back("dispatch focusmonitor " + prim);
+                batch_cmds.push_back("dispatch workspace " + std::to_string(ws_sec));
+            } else {
+                batch_cmds.push_back("keyword workspace 1,monitor:" + prim + ",default:true");
+                for (int w = 2; w <= 10; ++w) {
+                    batch_cmds.push_back("keyword workspace " + std::to_string(w) + ",monitor:" + prim);
+                }
+                batch_cmds.push_back("dispatch focusmonitor " + prim);
             }
         }
         HyprIPC::batch(batch_cmds);

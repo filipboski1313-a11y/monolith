@@ -1522,12 +1522,46 @@ static GtkWidget* build_display_page() {
         g_app.s.detect_monitor();
     }
 
+    // Primary Display Selector
+    AdwPreferencesGroup* g_primary = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    adw_preferences_group_set_title(g_primary, "Główny monitor (Primary Display)");
+    adw_preferences_group_set_description(g_primary, "Wybierz główny ekran roboczy (boczny monitor otrzymuje pulpit 1, a ekran główny pulpity 2, 3, 4, ...).");
+
+    std::vector<std::string> prim_names;
+    std::vector<std::string> prim_labels;
+    int current_prim_idx = 0;
+
+    for (size_t mi = 0; mi < g_app.s.monitors_list.size(); ++mi) {
+        const auto& m = g_app.s.monitors_list[mi];
+        if (!m.connected) continue;
+        prim_names.push_back(m.name);
+        std::string label = m.name + " (" + (m.description.empty() ? "Ekran" : m.description) + " • " + m.mode + ")";
+        prim_labels.push_back(label);
+        if (m.name == g_app.s.disp.primary_monitor) {
+            current_prim_idx = static_cast<int>(prim_names.size() - 1);
+        }
+    }
+
+    if (!prim_names.empty()) {
+        make_combo_row(g_primary, "Domyślny ekran główny", "Główny monitor otrzymuje pulpity 2+, a boczny ekran pulpit 1", prim_labels, current_prim_idx, [prim_names](int idx, const std::string&) {
+            if (idx >= 0 && idx < static_cast<int>(prim_names.size())) {
+                g_app.s.disp.primary_monitor = prim_names[idx];
+                g_app.s.disp.monitor_name = prim_names[idx];
+                g_app.s.save();
+                show_toast("Ustawiono " + prim_names[idx] + " jako główny monitor.");
+            }
+        });
+        gtk_box_append(GTK_BOX(box), GTK_WIDGET(g_primary));
+    }
+
     for (size_t mi = 0; mi < g_app.s.monitors_list.size(); ++mi) {
         auto& mon = g_app.s.monitors_list[mi];
+        if (!mon.connected) continue;
         AdwPreferencesGroup* g_dsp = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
-        std::string grp_title = (mi == 0 ? "󰍹 Primary Display: " : "󰍺 External Display: ") + mon.name;
+        bool is_prim = (mon.name == g_app.s.disp.primary_monitor);
+        std::string grp_title = (is_prim ? "󰍹 Główny monitor: " : "󰍺 Ekran dodatkowy: ") + mon.name;
         adw_preferences_group_set_title(g_dsp, grp_title.c_str());
-        std::string grp_desc = mon.description + " • Active Mode: " + mon.mode;
+        std::string grp_desc = mon.description + " • Tryb: " + mon.mode;
         adw_preferences_group_set_description(g_dsp, grp_desc.c_str());
 
         // Enable / Disable monitor

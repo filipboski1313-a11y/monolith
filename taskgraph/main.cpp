@@ -139,6 +139,7 @@ struct GraphState {
     cairo_surface_t* bg_surface = nullptr;
 
     std::string display_output = "all";
+    std::string primary_monitor = "";
     std::vector<OutputWindow*> outputs;
 
     int screen_w = 1920;
@@ -806,6 +807,14 @@ static void load_monolith_settings() {
             }
 
             if (g_graph.display_output != prev_out && g_graph.app) {
+                sync_output_windows(g_graph.app);
+            }
+        }
+
+        if (j.contains("display_settings")) {
+            std::string prev_prim = g_graph.primary_monitor;
+            g_graph.primary_monitor = j["display_settings"].value("primary_monitor", g_graph.primary_monitor);
+            if (g_graph.display_output == "primary" && g_graph.primary_monitor != prev_prim && g_graph.app) {
                 sync_output_windows(g_graph.app);
             }
         }
@@ -2278,7 +2287,11 @@ static void sync_output_windows(GApplication* app) {
         if (mode == "all") {
             want = true;
         } else if (mode == "primary") {
-            want = (i == 0);
+            if (!g_graph.primary_monitor.empty()) {
+                want = (conn_name == g_graph.primary_monitor);
+            } else {
+                want = (i == 0);
+            }
         } else if (mode == conn_name) {
             want = true;
         }
