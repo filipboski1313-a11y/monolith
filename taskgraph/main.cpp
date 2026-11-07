@@ -1844,7 +1844,7 @@ static void on_drag_end(GtkGestureDrag*, double, double, gpointer user_data) {
         auto& node = out->nodes[out->dragged_node_idx];
         node.is_dragged = false;
 
-        if (out->drag_dist < 6.0) {
+        if (out->drag_dist < 20.0) {
             focus_or_launch_node(out, node);
         }
     }

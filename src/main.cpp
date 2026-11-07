@@ -1177,7 +1177,7 @@ static void update_taskgraph_node_flag(const std::string& node_id, const std::st
 
         if (field == "load_to_ram" && !node_id.empty()) {
             std::string act = val ? "load \"" : "unload \"";
-            std::string full_cmd = "/usr/local/bin/monolith-ram-preloader " + act + node_id + "\" >/dev/null 2>&1 &";
+            std::string full_cmd = "monolith-ram-preloader " + act + node_id + "\" >/dev/null 2>&1 &";
             int r = system(full_cmd.c_str());
             (void)r;
         }
