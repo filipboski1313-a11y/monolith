@@ -122,6 +122,7 @@ struct OutputWindow {
     double sim_time = 0.0;
     double alpha = 1.0;
     double return_timer = 0.0;
+    int active_ws_id = 1;
     bool is_covered = false;
     bool fuzzel_active = false;
     bool physics_active = true;
@@ -754,6 +755,7 @@ static void check_desktop_state() {
             if (!out) continue;
             std::string mname = out->name;
             int ws = mon_active_ws.count(mname) ? mon_active_ws[mname] : active_ws_id;
+            out->active_ws_id = ws;
             std::string sp = mon_special_ws.count(mname) ? mon_special_ws[mname] : "";
 
             bool this_mon_special = (!sp.empty() && sp != "null" && sp != "special:ramvault" && sp != "special:hidden");
@@ -1634,21 +1636,7 @@ static int hit_test_node(OutputWindow* out, double x, double y) {
 static void focus_or_launch_node(OutputWindow* out, const AppNode& node) {
     if (node.is_running && !node.hypr_address.empty()) {
         if (node.workspace_label == "V" || node.workspace_label == "E") {
-            int target_ws_id = g_graph.active_ws_id;
-            std::string mon_raw = HyprIPC::request("j/monitors");
-            if (!mon_raw.empty() && out) {
-                try {
-                    json mj = json::parse(mon_raw);
-                    if (mj.is_array()) {
-                        for (const auto& mon : mj) {
-                            if (mon.value("name", "") == out->name) {
-                                target_ws_id = mon.value("activeWorkspace", json::object()).value("id", target_ws_id);
-                                break;
-                            }
-                        }
-                    }
-                } catch (...) {}
-            }
+            int target_ws_id = (out && out->active_ws_id > 0) ? out->active_ws_id : g_graph.active_ws_id;
             std::string target_ws = std::to_string(std::max(1, target_ws_id));
             std::vector<std::string> cmds;
             if (out && !out->name.empty()) {
@@ -1657,7 +1645,6 @@ static void focus_or_launch_node(OutputWindow* out, const AppNode& node) {
             cmds.push_back("dispatch movetoworkspace " + target_ws + ",address:" + node.hypr_address);
             cmds.push_back("dispatch focuswindow address:" + node.hypr_address);
             HyprIPC::batch(cmds);
-            check_desktop_state();
         } else if (node.workspace_label == "S") {
             HyprIPC::dispatch("togglespecialworkspace spotify");
         } else {
@@ -1673,7 +1660,166 @@ static void focus_or_launch_node(OutputWindow* out, const AppNode& node) {
     }
 }
 
-static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpointer user_data) {
+static void on_left_click(GtkGestureClick* gesture, int, double x, double y, gpointer user_data) {
+    OutputWindow* out = static_cast<OutputWindow*>(user_data);
+    if (!out) return;
+    out->is_covered = false;
+    ensure_physics_timer_running();
+    sync_monitor_focus(out);
+
+    if (out->menu_open) {
+        double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
+        double my = std::clamp(out->menu_y, 42.0, out->height - out->menu_h - 15.0);
+
+        if (out->menu_node_idx >= 0 && out->menu_node_idx < static_cast<int>(out->nodes.size())) {
+            if (x >= mx && x <= mx + out->menu_w && y >= my + 40.0 && y <= my + out->menu_h) {
+                int clicked_item = static_cast<int>((y - (my + 40.0)) / 32.0);
+                auto& target_node = out->nodes[out->menu_node_idx];
+
+                if (clicked_item == 0) {
+                    focus_or_launch_node(out, target_node);
+                } else if (clicked_item == 1) {
+                    if (target_node.is_running && !target_node.hypr_address.empty()) {
+                        if (target_node.workspace_label == "E") {
+                            std::string target_ws = std::to_string(std::max(1, (out->active_ws_id > 0) ? out->active_ws_id : g_graph.active_ws_id));
+                            HyprIPC::dispatch("movetoworkspace " + target_ws + ",address:" + target_node.hypr_address);
+                        } else {
+                            HyprIPC::dispatch("movetoworkspacesilent special:extra,address:" + target_node.hypr_address);
+                        }
+                    } else if (!target_node.exec_cmd.empty() || !target_node.id.empty()) {
+                        std::string launch_cmd = resolve_app_command(target_node.id, target_node.exec_cmd);
+                        HyprIPC::dispatch("exec sh -c \"" + launch_cmd + "\"");
+                    }
+                } else if (clicked_item == 2) {
+                    target_node.is_pinned = !target_node.is_pinned;
+                    if (!target_node.is_pinned) {
+                        target_node.load_to_ram = false;
+                    }
+                    bool found = false;
+                    for (auto& tmpl : g_graph.pinned_templates) {
+                        if (tmpl.id == target_node.id) {
+                            tmpl.load_to_ram = target_node.load_to_ram;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found && target_node.is_pinned) {
+                        g_graph.pinned_templates.push_back({
+                            target_node.id, target_node.name, target_node.icon_name,
+                            target_node.exec_cmd, target_node.match_class, target_node.load_to_ram
+                        });
+                    } else if (found && !target_node.is_pinned) {
+                        g_graph.pinned_templates.erase(
+                            std::remove_if(g_graph.pinned_templates.begin(), g_graph.pinned_templates.end(),
+                                [&](const PinnedTemplate& t){ return t.id == target_node.id; }),
+                            g_graph.pinned_templates.end()
+                        );
+                    }
+                    save_config();
+                    for (auto* o : g_graph.outputs) {
+                        if (!o) continue;
+                        for (auto& n : o->nodes) {
+                            if (n.id == target_node.id) {
+                                n.is_pinned = target_node.is_pinned;
+                                n.load_to_ram = target_node.load_to_ram;
+                            }
+                        }
+                        if (o->da) gtk_widget_queue_draw(o->da);
+                    }
+                } else if (clicked_item == 3) {
+                    target_node.load_to_ram = !target_node.load_to_ram;
+                    if (target_node.load_to_ram) {
+                        target_node.is_pinned = true;
+                    }
+                    bool found = false;
+                    for (auto& tmpl : g_graph.pinned_templates) {
+                        if (tmpl.id == target_node.id) {
+                            tmpl.load_to_ram = target_node.load_to_ram;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found && target_node.load_to_ram) {
+                        g_graph.pinned_templates.push_back({
+                            target_node.id, target_node.name, target_node.icon_name,
+                            target_node.exec_cmd, target_node.match_class, target_node.load_to_ram
+                        });
+                    }
+                    save_config();
+                    for (auto* o : g_graph.outputs) {
+                        if (!o) continue;
+                        for (auto& n : o->nodes) {
+                            if (n.id == target_node.id) {
+                                n.is_pinned = target_node.is_pinned;
+                                n.load_to_ram = target_node.load_to_ram;
+                            }
+                        }
+                        if (o->da) gtk_widget_queue_draw(o->da);
+                    }
+                    std::string action = target_node.load_to_ram ? "load" : "unload";
+                    exec_bg("monolith-ram-preloader " + action + " \"" + target_node.id + "\"");
+                } else if (clicked_item == 4 && target_node.is_running && !target_node.hypr_address.empty()) {
+                    HyprIPC::dispatch("closewindow address:" + target_node.hypr_address);
+                }
+
+                out->menu_open = false;
+                out->menu_node_idx = -1;
+                if (out->da) gtk_widget_queue_draw(out->da);
+                return;
+            }
+        } else if (out->menu_node_idx == -2) {
+            if (x >= mx && x <= mx + out->menu_w && y >= my + 40.0 && y <= my + out->menu_h) {
+                int clicked_item = static_cast<int>((y - (my + 40.0)) / 32.0);
+                if (clicked_item == 0) {
+                    out->scale = std::clamp(out->scale + 0.10, 0.40, 2.50);
+                } else if (clicked_item == 1) {
+                    out->scale = std::clamp(out->scale - 0.10, 0.40, 2.50);
+                } else if (clicked_item == 2) {
+                    out->scale = 1.0;
+                } else if (clicked_item == 3) {
+                    double cx = out->width / 2.0;
+                    double cy = out->height / 2.0;
+                    size_t count = out->nodes.size();
+                    double rx = std::clamp(cx * 0.44, 250.0, 560.0) * out->scale;
+                    double ry = std::clamp(cy * 0.48, 170.0, 340.0) * out->scale;
+                    for (size_t i = 0; i < count; ++i) {
+                        double angle = (2.0 * M_PI * i) / std::max(size_t(1), count) - (M_PI / 2.0);
+                        out->nodes[i].x = cx + rx * std::cos(angle);
+                        out->nodes[i].y = cy + ry * std::sin(angle);
+                        out->nodes[i].vx = 0.0;
+                        out->nodes[i].vy = 0.0;
+                    }
+                }
+
+                g_graph.monitor_scales[out->name] = out->scale;
+                out->scale_osd_alpha = 1.8;
+                out->scale_osd_text = out->name + " SCALE: " + std::to_string(static_cast<int>(std::round(out->scale * 100))) + "%";
+                save_config();
+                wake_output_physics(out, 0.7);
+                out->menu_open = false;
+                out->menu_node_idx = -1;
+                if (out->da) gtk_widget_queue_draw(out->da);
+                return;
+            }
+        }
+
+        out->menu_open = false;
+        out->menu_node_idx = -1;
+        if (out->da) gtk_widget_queue_draw(out->da);
+        return;
+    }
+
+    GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
+    bool is_modifier = (state & (GDK_CONTROL_MASK | GDK_SUPER_MASK | GDK_SHIFT_MASK)) != 0;
+    if (is_modifier) return;
+
+    int idx = hit_test_node(out, x, y);
+    if (idx >= 0 && idx < static_cast<int>(out->nodes.size())) {
+        focus_or_launch_node(out, out->nodes[idx]);
+    }
+}
+
+static void on_drag_begin(GtkGestureDrag* gesture, double start_x, double start_y, gpointer user_data) {
     OutputWindow* out = static_cast<OutputWindow*>(user_data);
     if (!out) return;
     out->is_covered = false;
@@ -1681,165 +1827,17 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
     sync_monitor_focus(out);
 
     out->dragged_node_idx = -1;
+    if (out->menu_open) return;
 
-    if (out->menu_open && out->menu_node_idx >= 0 && out->menu_node_idx < static_cast<int>(out->nodes.size())) {
-        double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
-        double my = std::clamp(out->menu_y, 42.0, out->height - out->menu_h - 15.0);
-
-        if (start_x >= mx && start_x <= mx + out->menu_w && start_y >= my + 40.0 && start_y <= my + out->menu_h) {
-            int clicked_item = static_cast<int>((start_y - (my + 40.0)) / 32.0);
-            auto& target_node = out->nodes[out->menu_node_idx];
-
-            if (clicked_item == 0) {
-                focus_or_launch_node(out, target_node);
-            } else if (clicked_item == 1) {
-                if (target_node.is_running && !target_node.hypr_address.empty()) {
-                    if (target_node.workspace_label == "E") {
-                        std::string target_ws = std::to_string(std::max(1, g_graph.active_ws_id));
-                        HyprIPC::dispatch("movetoworkspace " + target_ws + ",address:" + target_node.hypr_address);
-                    } else {
-                        HyprIPC::dispatch("movetoworkspacesilent special:extra,address:" + target_node.hypr_address);
-                    }
-                    check_desktop_state();
-                } else if (!target_node.exec_cmd.empty() || !target_node.id.empty()) {
-                    std::string launch_cmd = resolve_app_command(target_node.id, target_node.exec_cmd);
-                    HyprIPC::dispatch("exec sh -c \"" + launch_cmd + "\"");
-                }
-            } else if (clicked_item == 2) {
-                target_node.is_pinned = !target_node.is_pinned;
-                if (!target_node.is_pinned) {
-                    target_node.load_to_ram = false;
-                }
-                bool found = false;
-                for (auto& tmpl : g_graph.pinned_templates) {
-                    if (tmpl.id == target_node.id) {
-                        tmpl.load_to_ram = target_node.load_to_ram;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found && target_node.is_pinned) {
-                    g_graph.pinned_templates.push_back({
-                        target_node.id, target_node.name, target_node.icon_name,
-                        target_node.exec_cmd, target_node.match_class, target_node.load_to_ram
-                    });
-                } else if (found && !target_node.is_pinned) {
-                    g_graph.pinned_templates.erase(
-                        std::remove_if(g_graph.pinned_templates.begin(), g_graph.pinned_templates.end(),
-                            [&](const PinnedTemplate& t){ return t.id == target_node.id; }),
-                        g_graph.pinned_templates.end()
-                    );
-                }
-                save_config();
-                for (auto* o : g_graph.outputs) {
-                    if (!o) continue;
-                    for (auto& n : o->nodes) {
-                        if (n.id == target_node.id) {
-                            n.is_pinned = target_node.is_pinned;
-                            n.load_to_ram = target_node.load_to_ram;
-                        }
-                    }
-                    if (o->da) gtk_widget_queue_draw(o->da);
-                }
-            } else if (clicked_item == 3) {
-                target_node.load_to_ram = !target_node.load_to_ram;
-                if (target_node.load_to_ram) {
-                    target_node.is_pinned = true;
-                }
-                bool found = false;
-                for (auto& tmpl : g_graph.pinned_templates) {
-                    if (tmpl.id == target_node.id) {
-                        tmpl.load_to_ram = target_node.load_to_ram;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found && target_node.load_to_ram) {
-                    g_graph.pinned_templates.push_back({
-                        target_node.id, target_node.name, target_node.icon_name,
-                        target_node.exec_cmd, target_node.match_class, target_node.load_to_ram
-                    });
-                }
-                save_config();
-                for (auto* o : g_graph.outputs) {
-                    if (!o) continue;
-                    for (auto& n : o->nodes) {
-                        if (n.id == target_node.id) {
-                            n.is_pinned = target_node.is_pinned;
-                            n.load_to_ram = target_node.load_to_ram;
-                        }
-                    }
-                    if (o->da) gtk_widget_queue_draw(o->da);
-                }
-                std::string action = target_node.load_to_ram ? "load" : "unload";
-                exec_bg("monolith-ram-preloader " + action + " \"" + target_node.id + "\"");
-            } else if (clicked_item == 4 && target_node.is_running && !target_node.hypr_address.empty()) {
-                HyprIPC::dispatch("closewindow address:" + target_node.hypr_address);
-            }
-
-            out->menu_open = false;
-            out->menu_node_idx = -1;
-            if (out->da) gtk_widget_queue_draw(out->da);
-            return;
-        } else {
-            out->menu_open = false;
-            out->menu_node_idx = -1;
-            if (out->da) gtk_widget_queue_draw(out->da);
-            return;
-        }
-    }
-
-    if (out->menu_open && out->menu_node_idx == -2) {
-        double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
-        double my = std::clamp(out->menu_y, 42.0, out->height - out->menu_h - 15.0);
-
-        if (start_x >= mx && start_x <= mx + out->menu_w && start_y >= my + 40.0 && start_y <= my + out->menu_h) {
-            int clicked_item = static_cast<int>((start_y - (my + 40.0)) / 32.0);
-            if (clicked_item == 0) {
-                out->scale = std::clamp(out->scale + 0.10, 0.40, 2.50);
-            } else if (clicked_item == 1) {
-                out->scale = std::clamp(out->scale - 0.10, 0.40, 2.50);
-            } else if (clicked_item == 2) {
-                out->scale = 1.0;
-            } else if (clicked_item == 3) {
-                double cx = out->width / 2.0;
-                double cy = out->height / 2.0;
-                size_t count = out->nodes.size();
-                double rx = std::clamp(cx * 0.44, 250.0, 560.0) * out->scale;
-                double ry = std::clamp(cy * 0.48, 170.0, 340.0) * out->scale;
-                for (size_t i = 0; i < count; ++i) {
-                    double angle = (2.0 * M_PI * i) / std::max(size_t(1), count) - (M_PI / 2.0);
-                    out->nodes[i].x = cx + rx * std::cos(angle);
-                    out->nodes[i].y = cy + ry * std::sin(angle);
-                    out->nodes[i].vx = 0.0;
-                    out->nodes[i].vy = 0.0;
-                }
-            }
-
-            g_graph.monitor_scales[out->name] = out->scale;
-            out->scale_osd_alpha = 1.8;
-            out->scale_osd_text = out->name + " SCALE: " + std::to_string(static_cast<int>(std::round(out->scale * 100))) + "%";
-            save_config();
-            wake_output_physics(out, 0.7);
-            out->menu_open = false;
-            out->menu_node_idx = -1;
-            if (out->da) gtk_widget_queue_draw(out->da);
-            return;
-        } else {
-            out->menu_open = false;
-            out->menu_node_idx = -1;
-            if (out->da) gtk_widget_queue_draw(out->da);
-            return;
-        }
-    }
+    GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
+    bool is_modifier = (state & (GDK_CONTROL_MASK | GDK_SUPER_MASK | GDK_SHIFT_MASK)) != 0;
 
     int idx = hit_test_node(out, start_x, start_y);
-    out->dragged_node_idx = idx;
-    out->drag_start_x = start_x;
-    out->drag_start_y = start_y;
-    out->drag_dist = 0.0;
-
-    if (idx >= 0) {
+    if (idx >= 0 && is_modifier) {
+        out->dragged_node_idx = idx;
+        out->drag_start_x = start_x;
+        out->drag_start_y = start_y;
+        out->drag_dist = 0.0;
         out->nodes[idx].is_dragged = true;
         out->nodes[idx].vx = 0.0;
         out->nodes[idx].vy = 0.0;
@@ -1867,10 +1865,6 @@ static void on_drag_end(GtkGestureDrag*, double, double, gpointer user_data) {
     if (out->dragged_node_idx >= 0 && out->dragged_node_idx < static_cast<int>(out->nodes.size())) {
         auto& node = out->nodes[out->dragged_node_idx];
         node.is_dragged = false;
-
-        if (out->drag_dist < 20.0) {
-            focus_or_launch_node(out, node);
-        }
     }
 
     out->dragged_node_idx = -1;
@@ -2070,6 +2064,11 @@ static void sync_output_windows(GApplication* app) {
                 gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(out->da), draw_graph, out, nullptr);
                 gtk_window_set_child(GTK_WINDOW(out->win), out->da);
 
+                GtkGesture* left_click = gtk_gesture_click_new();
+                gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(left_click), GDK_BUTTON_PRIMARY);
+                g_signal_connect(left_click, "pressed", G_CALLBACK(on_left_click), out);
+                gtk_widget_add_controller(out->da, GTK_EVENT_CONTROLLER(left_click));
+
                 GtkGesture* drag = gtk_gesture_drag_new();
                 g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), out);
                 g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), out);
@@ -2179,6 +2178,11 @@ static void on_activate(GApplication* app, gpointer) {
     }
 
     ensure_physics_timer_running();
+    for (const auto& tmpl : g_graph.pinned_templates) {
+        if (tmpl.load_to_ram) {
+            exec_bg("monolith-ram-preloader warm \"" + tmpl.id + "\"");
+        }
+    }
     std::thread(hypr_socket_listener_thread).detach();
 }
 
