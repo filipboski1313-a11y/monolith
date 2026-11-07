@@ -348,6 +348,89 @@ static void rebuild_all_backgrounds() {
     }
 }
 
+static void rebuild_output_constellation_edges(OutputWindow* out) {
+    if (!out) return;
+
+    // Preserve dynamic edges connected to unpinned satellite windows
+    std::vector<AppEdge> preserved_edges;
+    for (const auto& e : out->edges) {
+        bool has_unpinned = false;
+        for (const auto& n : out->nodes) {
+            if ((n.id == e.from_id || n.id == e.to_id) && !n.is_pinned) {
+                has_unpinned = true;
+                break;
+            }
+        }
+        if (has_unpinned) {
+            preserved_edges.push_back(e);
+        }
+    }
+    out->edges = std::move(preserved_edges);
+
+    auto add_edge = [&](const std::string& a, const std::string& b, double len) {
+        if (a == b) return;
+        bool has_a = false, has_b = false;
+        for (const auto& n : out->nodes) {
+            if (n.id == a) has_a = true;
+            if (n.id == b) has_b = true;
+        }
+        if (!has_a || !has_b) return;
+        for (const auto& e : out->edges) {
+            if ((e.from_id == a && e.to_id == b) || (e.from_id == b && e.to_id == a)) return;
+        }
+        out->edges.push_back({a, b, len});
+    };
+
+    if (!g_graph.template_edges.empty()) {
+        for (const auto& te : g_graph.template_edges) {
+            add_edge(te.from_id, te.to_id, te.rest_length * out->scale);
+        }
+        return;
+    }
+
+    // Dynamic Rule-Based Constellation:
+    // Gather all pinned nodes, find centroid, sort by polar angle theta around center
+    std::vector<size_t> pinned_indices;
+    double sum_x = 0.0, sum_y = 0.0;
+    for (size_t i = 0; i < out->nodes.size(); ++i) {
+        if (out->nodes[i].is_pinned) {
+            pinned_indices.push_back(i);
+            sum_x += out->nodes[i].x;
+            sum_y += out->nodes[i].y;
+        }
+    }
+
+    size_t m = pinned_indices.size();
+    if (m < 2) return;
+
+    double cx = sum_x / static_cast<double>(m);
+    double cy = sum_y / static_cast<double>(m);
+
+    // Rule 1: Sort by polar angle theta = atan2(y - cy, x - cx)
+    std::sort(pinned_indices.begin(), pinned_indices.end(), [&](size_t a, size_t b) {
+        double ang_a = std::atan2(out->nodes[a].y - cy, out->nodes[a].x - cx);
+        double ang_b = std::atan2(out->nodes[b].y - cy, out->nodes[b].x - cx);
+        return ang_a < ang_b;
+    });
+
+    // Rule 2: Angular Perimeter Ring - connect adjacent angular neighbors (zero crossing lines)
+    for (size_t i = 0; i < m; ++i) {
+        const std::string& id_a = out->nodes[pinned_indices[i]].id;
+        const std::string& id_b = out->nodes[pinned_indices[(i + 1) % m]].id;
+        add_edge(id_a, id_b, 145.0 * out->scale);
+    }
+
+    // Rule 3: Triangulation Chords - connect every 2nd angular neighbor to form planar constellation triangles
+    if (m >= 5) {
+        for (size_t i = 0; i < m; ++i) {
+            if (m % 2 == 0 && (i % 2 != 0)) continue;
+            const std::string& id_a = out->nodes[pinned_indices[i]].id;
+            const std::string& id_b = out->nodes[pinned_indices[(i + 2) % m]].id;
+            add_edge(id_a, id_b, 260.0 * out->scale);
+        }
+    }
+}
+
 static void init_output_nodes(OutputWindow* out, bool preserve_positions = false) {
     if (!out) return;
 
@@ -403,36 +486,7 @@ static void init_output_nodes(OutputWindow* out, bool preserve_positions = false
         out->nodes.push_back(n);
     }
 
-    auto add_edge = [&](const std::string& a, const std::string& b, double len) {
-        if (a == b) return;
-        bool has_a = false, has_b = false;
-        for (const auto& n : out->nodes) {
-            if (n.id == a) has_a = true;
-            if (n.id == b) has_b = true;
-        }
-        if (!has_a || !has_b) return;
-        for (const auto& e : out->edges) {
-            if ((e.from_id == a && e.to_id == b) || (e.from_id == b && e.to_id == a)) return;
-        }
-        out->edges.push_back({a, b, len});
-    };
-
-    if (!g_graph.template_edges.empty()) {
-        for (const auto& te : g_graph.template_edges) {
-            add_edge(te.from_id, te.to_id, te.rest_length);
-        }
-    } else {
-        if (count >= 2) {
-            for (size_t i = 0; i < count; ++i) {
-                add_edge(out->nodes[i].id, out->nodes[(i + 1) % count].id, 145.0);
-            }
-        }
-        if (count >= 6) {
-            for (size_t i = 0; i < count; i += 2) {
-                add_edge(out->nodes[i].id, out->nodes[(i + 2) % count].id, 260.0);
-            }
-        }
-    }
+    rebuild_output_constellation_edges(out);
 }
 
 static void save_config() {
@@ -760,6 +814,7 @@ static void check_desktop_state() {
             }
 
             // Sync pinned nodes running state
+            std::unordered_set<std::string> output_pinned_addrs;
             for (auto& n : out->nodes) {
                 if (n.is_pinned) {
                     n.is_running = false;
@@ -785,6 +840,7 @@ static void check_desktop_state() {
                             std::string cws_name = c.value("workspace", json::object()).value("name", "");
                             n.workspace_id = cws;
                             n.workspace_label = format_ws_badge(cws, cws_name);
+                            output_pinned_addrs.insert(addr);
                             break;
                         }
                     }
@@ -813,6 +869,89 @@ static void check_desktop_state() {
                         n.workspace_label = format_ws_badge(cws, cws_name);
                     }
                 }
+            }
+
+            // Rule 3: Dynamic Window Attachment for active unpinned windows
+            for (const auto& [addr, c] : unpinned_candidates) {
+                if (output_pinned_addrs.find(addr) != output_pinned_addrs.end()) continue;
+
+                bool already_exists = false;
+                for (const auto& n : out->nodes) {
+                    if (!n.is_pinned && n.hypr_address == addr) {
+                        already_exists = true;
+                        break;
+                    }
+                }
+                if (already_exists) continue;
+
+                std::string cls = c.value("class", "");
+                std::string title = c.value("title", "");
+                int cws = c.value("workspace", json::object()).value("id", 1);
+                std::string cws_name = c.value("workspace", json::object()).value("name", "");
+
+                AppNode dn;
+                dn.id = "win_" + addr;
+                dn.name = cls.empty() ? title : cls;
+                if (dn.name.length() > 14) dn.name = dn.name.substr(0, 12) + "..";
+
+                std::string icon_lookup = cls;
+                std::transform(icon_lookup.begin(), icon_lookup.end(), icon_lookup.begin(), ::tolower);
+                dn.icon_name = icon_lookup;
+                dn.exec_cmd = cls;
+                dn.match_class = cls;
+                dn.hypr_address = addr;
+                dn.workspace_id = cws;
+                dn.workspace_label = format_ws_badge(cws, cws_name);
+                dn.is_pinned = false;
+                dn.is_running = true;
+                dn.radius = g_graph.node_radius;
+                dn.drift_phase = (rand() % 628) / 100.0;
+                dn.drift_speed = 0.22;
+
+                // Find anchor: prefer node sharing the same workspace, else nearest Euclidean node
+                int connect_to_idx = -1;
+                for (size_t i = 0; i < out->nodes.size(); ++i) {
+                    if (out->nodes[i].workspace_id == cws && !out->nodes[i].hypr_address.empty()) {
+                        connect_to_idx = static_cast<int>(i);
+                        break;
+                    }
+                }
+
+                if (connect_to_idx >= 0) {
+                    const auto& parent = out->nodes[connect_to_idx];
+                    double ang = (rand() % 360) * M_PI / 180.0;
+                    dn.x = std::clamp(parent.x + 180.0 * out->scale * std::cos(ang), 100.0 * out->scale, out->width - 100.0 * out->scale);
+                    dn.y = std::clamp(parent.y + 180.0 * out->scale * std::sin(ang), 100.0 * out->scale, out->height - 100.0 * out->scale);
+                } else if (!out->nodes.empty()) {
+                    const auto& ref = out->nodes[rand() % out->nodes.size()];
+                    double ang = (rand() % 360) * M_PI / 180.0;
+                    dn.x = std::clamp(ref.x + 210.0 * out->scale * std::cos(ang), 100.0 * out->scale, out->width - 100.0 * out->scale);
+                    dn.y = std::clamp(ref.y + 210.0 * out->scale * std::sin(ang), 100.0 * out->scale, out->height - 100.0 * out->scale);
+                } else {
+                    dn.x = out->width * 0.5;
+                    dn.y = out->height * 0.5;
+                }
+
+                dn.pixbuf = get_icon_pixbuf(dn.icon_name, 22);
+                out->nodes.push_back(dn);
+
+                // Attach edge to anchor or nearest node
+                if (connect_to_idx < 0 && out->nodes.size() > 1) {
+                    double min_dist = 1e9;
+                    for (size_t i = 0; i < out->nodes.size() - 1; ++i) {
+                        double d = std::hypot(dn.x - out->nodes[i].x, dn.y - out->nodes[i].y);
+                        if (d < min_dist) {
+                            min_dist = d;
+                            connect_to_idx = static_cast<int>(i);
+                        }
+                    }
+                }
+
+                if (connect_to_idx >= 0 && connect_to_idx < static_cast<int>(out->nodes.size() - 1)) {
+                    out->edges.push_back({dn.id, out->nodes[connect_to_idx].id, 240.0 * out->scale});
+                }
+
+                topo_changed = true;
             }
 
             // Clean dangling edges
@@ -1707,6 +1846,7 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
                                 n.load_to_ram = target_node.load_to_ram;
                             }
                         }
+                        rebuild_output_constellation_edges(o);
                         if (o->da) gtk_widget_queue_draw(o->da);
                     }
                 } else if (clicked_item == 3) {
@@ -1737,6 +1877,7 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
                                 n.load_to_ram = target_node.load_to_ram;
                             }
                         }
+                        rebuild_output_constellation_edges(o);
                         if (o->da) gtk_widget_queue_draw(o->da);
                     }
                     std::string action = target_node.load_to_ram ? "load" : "unload";
@@ -1772,6 +1913,7 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
                         out->nodes[i].vx = 0.0;
                         out->nodes[i].vy = 0.0;
                     }
+                    rebuild_output_constellation_edges(out);
                 }
 
                 g_graph.monitor_scales[out->name] = out->scale;
