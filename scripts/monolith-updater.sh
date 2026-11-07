@@ -328,6 +328,21 @@ perform_upgrade() {
     fi
     sleep 0.3
 
+    # Ensure machine-specific hardware profile exists (sourced by hyprland.conf)
+    local hw_conf="${BASE_DIR}/hardware.conf"
+    if [ ! -f "$hw_conf" ]; then
+        echo "Generating missing hardware.conf..."
+        if command -v nvidia-smi &>/dev/null && lsmod | grep -q nvidia; then
+            printf '%s\n' "# --- Hardware & GPU Configuration (NVIDIA) ---" \
+                "env = LIBVA_DRIVER_NAME,nvidia" "env = GBM_BACKEND,nvidia-drm" \
+                "env = __GLX_VENDOR_LIBRARY_NAME,nvidia" "env = WLR_NO_HARDWARE_CURSORS,1" \
+                "env = NVD_BACKEND,direct" > "$hw_conf"
+        else
+            printf '%s\n' "# --- Hardware & GPU Configuration (AMD / Intel) ---" \
+                "env = AMD_VULKAN_ICD,RADV" "env = RADV_PERFTEST,gpl" > "$hw_conf"
+        fi
+    fi
+
     # Step 6: Reload components & desktop session
     echo "[STEP 6/6] Reloading shell components and active desktop session..."
     if command -v systemctl &>/dev/null; then
