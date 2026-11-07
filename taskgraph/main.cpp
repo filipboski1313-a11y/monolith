@@ -660,19 +660,9 @@ static void setup_file_monitors() {
 static std::string format_ws_badge(int ws_id, const std::string& ws_name) {
     if (ws_name.find("spotify") != std::string::npos) return "S";
     if (ws_name.find("extra") != std::string::npos) return "E";
-    if (ws_name.find("hidden") != std::string::npos || ws_name.find("ramvault") != std::string::npos) return "V";
+    if (ws_name.find("ramvault") != std::string::npos || ws_name.find("hidden") != std::string::npos) return "V";
     if (ws_id > 0) return "W" + std::to_string(ws_id);
     return "-";
-}
-
-static std::string g_hypr_focused_mon;
-
-static void sync_monitor_focus(OutputWindow* out) {
-    if (!out || out->name.empty()) return;
-    if (g_hypr_focused_mon != out->name) {
-        g_hypr_focused_mon = out->name;
-        HyprIPC::dispatch("focusmonitor " + out->name);
-    }
 }
 
 static void check_desktop_state() {
@@ -688,9 +678,6 @@ static void check_desktop_state() {
             if (mj.is_array()) {
                 for (const auto& mon : mj) {
                     std::string mname = mon.value("name", "");
-                    if (mon.value("focused", false)) {
-                        g_hypr_focused_mon = mname;
-                    }
                     int mws = mon.value("activeWorkspace", json::object()).value("id", 1);
                     std::string sp = mon.value("specialWorkspace", json::object()).value("name", "");
                     mon_active_ws[mname] = mws;
@@ -782,9 +769,16 @@ static void check_desktop_state() {
                     for (const auto& c : clients) {
                         std::string cls = c.value("class", "");
                         std::string addr = c.value("address", "");
+                        bool matched = false;
                         if (!n.match_class.empty() && (strcasecmp(cls.c_str(), n.match_class.c_str()) == 0 ||
                             case_insensitive_contains(cls, n.match_class) ||
                             case_insensitive_contains(n.match_class, cls))) {
+                            matched = true;
+                        } else if (!n.id.empty() && (case_insensitive_contains(cls, n.id) || case_insensitive_contains(n.id, cls))) {
+                            matched = true;
+                        }
+
+                        if (matched) {
                             n.is_running = true;
                             n.hypr_address = addr;
                             int cws = c.value("workspace", json::object()).value("id", 1);
@@ -884,16 +878,6 @@ static void hypr_socket_listener_thread() {
             ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
             if (n <= 0) break;
             buf[n] = '\0';
-
-            // Track currently focused monitor across Hyprland
-            const char* fmon = std::strstr(buf, "focusedmon>>");
-            if (fmon) {
-                fmon += 12;
-                const char* comma = std::strchr(fmon, ',');
-                if (comma) {
-                    g_hypr_focused_mon = std::string(fmon, comma - fmon);
-                }
-            }
 
             // Hardware-speed guard: never allow special:ramvault to open as a visible overlay
             if (std::strstr(buf, "activespecial>>special:ramvault")) {
@@ -1403,7 +1387,8 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
 
         // Top-Left Badge: Workspace Indicator (W1..W9, S, E, V)
         if (node.is_running && !node.workspace_label.empty()) {
-            cairo_set_font_size(cr, std::clamp(8.0 * out->scale, 6.5, 13.0));
+            cairo_select_font_face(cr, "JetBrains Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+            cairo_set_font_size(cr, std::clamp(8.5 * out->scale, 7.0, 14.0));
             cairo_text_extents_t wext;
             cairo_text_extents(cr, node.workspace_label.c_str(), &wext);
             double bw = std::max(14.0 * out->scale, wext.width + 7.0 * out->scale);
@@ -1639,9 +1624,6 @@ static void focus_or_launch_node(OutputWindow* out, const AppNode& node) {
             int target_ws_id = (out && out->active_ws_id > 0) ? out->active_ws_id : g_graph.active_ws_id;
             std::string target_ws = std::to_string(std::max(1, target_ws_id));
             std::vector<std::string> cmds;
-            if (out && !out->name.empty()) {
-                cmds.push_back("dispatch focusmonitor " + out->name);
-            }
             cmds.push_back("dispatch movetoworkspace " + target_ws + ",address:" + node.hypr_address);
             cmds.push_back("dispatch focuswindow address:" + node.hypr_address);
             HyprIPC::batch(cmds);
@@ -1665,7 +1647,6 @@ static void on_left_click(GtkGestureClick* gesture, int, double x, double y, gpo
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
-    sync_monitor_focus(out);
 
     if (out->menu_open) {
         double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
@@ -1824,7 +1805,6 @@ static void on_drag_begin(GtkGestureDrag* gesture, double start_x, double start_
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
-    sync_monitor_focus(out);
 
     out->dragged_node_idx = -1;
     if (out->menu_open) return;
@@ -1876,7 +1856,6 @@ static void on_right_click(GtkGestureClick*, int, double x, double y, gpointer u
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
-    sync_monitor_focus(out);
 
     int idx = hit_test_node(out, x, y);
     if (idx >= 0) {
@@ -1923,7 +1902,6 @@ static void on_middle_click(GtkGestureClick*, int, double x, double y, gpointer 
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
-    sync_monitor_focus(out);
 
     int idx = hit_test_node(out, x, y);
     if (idx >= 0 && out->nodes[idx].is_running && !out->nodes[idx].hypr_address.empty()) {
@@ -1943,7 +1921,6 @@ static void on_motion(GtkEventControllerMotion*, double x, double y, gpointer us
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
-    sync_monitor_focus(out);
 
     if (out->menu_open) {
         double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
@@ -2086,9 +2063,6 @@ static void sync_output_windows(GApplication* app) {
                 gtk_widget_add_controller(out->da, GTK_EVENT_CONTROLLER(middle_click));
 
                 GtkEventController* motion = gtk_event_controller_motion_new();
-                g_signal_connect(motion, "enter", G_CALLBACK(+[](GtkEventControllerMotion*, double, double, gpointer user_data) {
-                    sync_monitor_focus(static_cast<OutputWindow*>(user_data));
-                }), out);
                 g_signal_connect(motion, "motion", G_CALLBACK(on_motion), out);
                 gtk_widget_add_controller(out->da, motion);
 
