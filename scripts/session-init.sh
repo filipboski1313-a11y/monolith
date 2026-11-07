@@ -33,3 +33,9 @@ systemctl --user reset-failed 2>/dev/null || true
 
 # Preload configured applications into physical RAM cache on startup
 systemctl --user start monolith-ram-preload.service 2>/dev/null || /usr/local/bin/monolith-ram-preloader preload-all &
+
+# First-Run Welcome Experience (introduces user to Monolith and opens Control Center)
+FIRST_RUN_FLAG="${XDG_CONFIG_HOME:-$HOME/.config}/monolith/.first_run_done"
+if [ ! -f "$FIRST_RUN_FLAG" ]; then
+    /usr/local/bin/monolith-settings --welcome &
+fi

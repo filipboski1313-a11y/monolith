@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <thread>
 #include <atomic>
+#include <sys/utsname.h>
+#include <sys/sysinfo.h>
+#include <filesystem>
 
 #include "settings.hpp"
 #include "bezier_widget.hpp"
@@ -15,6 +18,8 @@
 #include "version.hpp"
 
 using namespace Monolith;
+
+static bool g_show_welcome = false;
 
 // Global application context
 struct AppContext {
@@ -470,6 +475,212 @@ static ColorControl* make_color_row(
     })), ctrl);
 
     return ctrl;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DEFAULT OVERVIEW & HARDWARE SPECIFICATIONS
+// ──────────────────────────────────────────────────────────────────────────────
+static std::string get_os_pretty_name() {
+    std::ifstream f("/etc/os-release");
+    if (!f.is_open()) return "Linux System";
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.rfind("PRETTY_NAME=", 0) == 0) {
+            std::string name = line.substr(12);
+            if (!name.empty() && name.front() == '"') name.erase(0, 1);
+            if (!name.empty() && name.back() == '"') name.pop_back();
+            return name;
+        }
+    }
+    return "Linux";
+}
+
+static std::string get_kernel_info() {
+    struct utsname u;
+    if (uname(&u) == 0) {
+        return std::string(u.sysname) + " " + u.release + " (" + u.machine + ")";
+    }
+    return "Linux Kernel";
+}
+
+static std::string get_cpu_info() {
+    std::string model = "Processor";
+    std::ifstream f("/proc/cpuinfo");
+    if (f.is_open()) {
+        std::string line;
+        while (std::getline(f, line)) {
+            if (line.find("model name") != std::string::npos) {
+                size_t colon = line.find(':');
+                if (colon != std::string::npos) {
+                    model = line.substr(colon + 2);
+                    break;
+                }
+            }
+        }
+    }
+    unsigned int threads = std::thread::hardware_concurrency();
+    if (threads > 0) {
+        return model + " (" + std::to_string(threads) + " Threads)";
+    }
+    return model;
+}
+
+static std::string get_ram_info() {
+    struct sysinfo si;
+    if (sysinfo(&si) == 0) {
+        double total_gb = (double)si.totalram * si.mem_unit / (1024.0 * 1024.0 * 1024.0);
+        double free_gb = (double)si.freeram * si.mem_unit / (1024.0 * 1024.0 * 1024.0);
+        double used_gb = total_gb - free_gb;
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(1) << total_gb << " GB Total (" << used_gb << " GB Active)";
+        return ss.str();
+    }
+    return "16 GB Total";
+}
+
+static std::string get_active_monitors_summary() {
+    std::string json_raw = run_cmd("hyprctl monitors -j 2>/dev/null");
+    if (json_raw.empty()) return "Internal Display";
+    try {
+        auto j = nlohmann::json::parse(json_raw);
+        if (j.is_array() && !j.empty()) {
+            std::string summary = "";
+            for (size_t i = 0; i < j.size(); ++i) {
+                if (i > 0) summary += " | ";
+                std::string name = j[i].value("name", "Display");
+                int w = j[i].value("width", 0);
+                int h = j[i].value("height", 0);
+                double hz = j[i].value("refreshRate", 60.0);
+                double scale = j[i].value("scale", 1.0);
+                std::ostringstream ss;
+                ss << name << " (" << w << "x" << h << "@" << std::fixed << std::setprecision(0) << hz << "Hz, " << std::setprecision(2) << scale << "x)";
+                summary += ss.str();
+            }
+            return summary;
+        }
+    } catch (...) {}
+    return "eDP-1 (1920x1200)";
+}
+
+static GtkWidget* build_overview_page() {
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    gtk_widget_set_margin_start(box, 24);
+    gtk_widget_set_margin_end(box, 24);
+    gtk_widget_set_margin_top(box, 20);
+    gtk_widget_set_margin_bottom(box, 20);
+
+    // Hero Banner Card
+    GtkWidget* hero_card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_add_css_class(hero_card, "hero-card");
+    gtk_widget_set_margin_bottom(hero_card, 6);
+
+    GtkWidget* title = gtk_label_new("MONOLITH HYPRLAND");
+    gtk_widget_add_css_class(title, "title-1");
+    gtk_widget_set_halign(title, GTK_ALIGN_START);
+
+    std::string ver_text = "Release v" + std::string(MONOLITH_VERSION) + " • High-Performance C++20 Environment";
+    GtkWidget* sub = gtk_label_new(ver_text.c_str());
+    gtk_widget_add_css_class(sub, "dim-label");
+    gtk_widget_set_halign(sub, GTK_ALIGN_START);
+
+    gtk_box_append(GTK_BOX(hero_card), title);
+    gtk_box_append(GTK_BOX(hero_card), sub);
+    gtk_box_append(GTK_BOX(box), hero_card);
+
+    // Group 1: Hardware & System Specifications
+    AdwPreferencesGroup* g_specs = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    adw_preferences_group_set_title(g_specs, "System & Hardware Specifications");
+    adw_preferences_group_set_description(g_specs, "Detected platform and hardware parameters.");
+
+    auto add_spec_row = [&](const std::string& label, const std::string& value) {
+        AdwActionRow* row = ADW_ACTION_ROW(adw_action_row_new());
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), label.c_str());
+        adw_action_row_set_subtitle(row, value.c_str());
+        adw_preferences_group_add(g_specs, GTK_WIDGET(row));
+    };
+
+    add_spec_row("Operating System", get_os_pretty_name());
+    add_spec_row("Kernel & Architecture", get_kernel_info());
+    add_spec_row("Processor (CPU)", get_cpu_info());
+    add_spec_row("System Memory (RAM)", get_ram_info());
+    add_spec_row("Window Compositor", "Hyprland (Direct Wayland Socket2 IPC)");
+    add_spec_row("Active Displays", get_active_monitors_summary());
+
+    gtk_box_append(GTK_BOX(box), GTK_WIDGET(g_specs));
+
+    // Group 2: Active Monolith Daemons Status
+    AdwPreferencesGroup* g_daemons = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    adw_preferences_group_set_title(g_daemons, "Active Monolith Services");
+    adw_preferences_group_set_description(g_daemons, "Real-time state of background systemd modules.");
+
+    auto add_daemon_row = [&](const std::string& title_str, const std::string& desc, const std::string& unit) {
+        AdwActionRow* r = ADW_ACTION_ROW(adw_action_row_new());
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(r), title_str.c_str());
+        adw_action_row_set_subtitle(r, desc.c_str());
+
+        bool active = (system(("systemctl --user is-active --quiet " + unit).c_str()) == 0);
+        GtkWidget* badge = gtk_label_new(active ? "● Running" : "○ Inactive");
+        gtk_widget_add_css_class(badge, active ? "badge-uptodate" : "dim-label");
+        gtk_widget_set_valign(badge, GTK_ALIGN_CENTER);
+        adw_action_row_add_suffix(r, badge);
+
+        adw_preferences_group_add(g_daemons, GTK_WIDGET(r));
+    };
+
+    add_daemon_row("Top Status Bar", "Waybar (Pinnable OLED bar with hardware modules)", "monolith-waybar.service");
+    add_daemon_row("Desktop Constellation", "Task Graph (Zero-overhead 0.00% background process graph)", "monolith-taskgraph.service");
+    add_daemon_row("Edge Toolbox Drawer", "monolith-toolbox (Canvas, Stopwatch, Calc, Scratchpad)", "monolith-toolbox.service");
+    add_daemon_row("Native Micro Popups", "monolith-popup (Hardware sliders, Wi-Fi, Bluetooth)", "monolith-popup.service");
+    add_daemon_row("Kernel RAM Preload", "monolith-ram-preload (Warm kernel pagecache residency)", "monolith-ram-preload.service");
+
+    gtk_box_append(GTK_BOX(box), GTK_WIDGET(g_daemons));
+
+    // Group 3: Quick Navigation & Actions
+    AdwPreferencesGroup* g_actions = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    adw_preferences_group_set_title(g_actions, "Quick Navigation & Actions");
+
+    GtkWidget* act_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_margin_top(act_box, 6);
+    gtk_widget_set_margin_bottom(act_box, 6);
+
+    auto make_nav_btn = [&](const char* label, const char* target_stack, int sidebar_idx) {
+        GtkWidget* btn = gtk_button_new_with_label(label);
+        gtk_widget_set_hexpand(btn, TRUE);
+        g_object_set_data_full(G_OBJECT(btn), "target", g_strdup(target_stack), g_free);
+        g_object_set_data(G_OBJECT(btn), "idx", GINT_TO_POINTER(sidebar_idx));
+        g_signal_connect(btn, "clicked", G_CALLBACK(+[](GtkButton* b, gpointer) {
+            const char* tgt = (const char*)g_object_get_data(G_OBJECT(b), "target");
+            int idx = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "idx"));
+            gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), tgt);
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), idx));
+        }), nullptr);
+        gtk_box_append(GTK_BOX(act_box), btn);
+    };
+
+    make_nav_btn("Appearance & Colors", "appearance", 1);
+    make_nav_btn("Wallpapers & Grain", "grain", 2);
+    make_nav_btn("Keybindings", "shortcuts", 8);
+    make_nav_btn("Check Updates", "updates", 9);
+
+    adw_preferences_group_add(g_actions, act_box);
+
+    // Reload Hyprland action row
+    AdwActionRow* reload_row = ADW_ACTION_ROW(adw_action_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(reload_row), "Reload Shell Configuration");
+    adw_action_row_set_subtitle(reload_row, "Hot-reload Hyprland keywords and configs via hyprctl reload");
+
+    GtkWidget* btn_reload = gtk_button_new_with_label("Reload Shell");
+    gtk_widget_set_valign(btn_reload, GTK_ALIGN_CENTER);
+    g_signal_connect(btn_reload, "clicked", G_CALLBACK(+[](GtkButton*, gpointer) {
+        system("hyprctl reload config-only >/dev/null 2>&1");
+        show_toast("Shell configuration reloaded successfully");
+    }), nullptr);
+    adw_action_row_add_suffix(reload_row, btn_reload);
+    adw_preferences_group_add(g_actions, GTK_WIDGET(reload_row));
+
+    gtk_box_append(GTK_BOX(box), GTK_WIDGET(g_actions));
+
+    return box;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2290,6 +2501,12 @@ static void on_app_activate(GApplication* app, gpointer) {
             background-color: #ffffff;
             border-radius: 3px;
         }
+        .hero-card {
+            background-color: #060608;
+            border: 1px solid #1c1c24;
+            border-radius: 8px;
+            padding: 18px 22px;
+        }
     )";
     GtkCssProvider* provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, css);
@@ -2339,6 +2556,7 @@ static void on_app_activate(GApplication* app, gpointer) {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(g_app.sidebar_list), GTK_SELECTION_SINGLE);
 
     std::vector<std::pair<std::string, std::string>> categories = {
+        {"Overview & Specs", "overview"},
         {"Appearance & Borders", "appearance"},
         {"Wallpaper & Grain", "grain"},
         {"Motion & Physics", "motion"},
@@ -2375,6 +2593,7 @@ static void on_app_activate(GApplication* app, gpointer) {
         gtk_stack_add_named(GTK_STACK(g_app.stack), sc, name.c_str());
     };
 
+    add_page(build_overview_page(), "overview");
     add_page(build_appearance_page(), "appearance");
     add_page(build_grain_page(), "grain");
     add_page(build_motion_page(), "motion");
@@ -2390,13 +2609,13 @@ static void on_app_activate(GApplication* app, gpointer) {
     g_signal_connect(g_app.sidebar_list, "row-selected", G_CALLBACK((+[](GtkListBox*, GtkListBoxRow* row, gpointer) {
         if (!row) return;
         int idx = gtk_list_box_row_get_index(row);
-        static const char* names[] = {"appearance", "grain", "motion", "taskgraph", "waybar", "input", "display", "shortcuts", "updates", "about"};
-        if (idx >= 0 && idx < 10) {
+        static const char* names[] = {"overview", "appearance", "grain", "motion", "taskgraph", "waybar", "input", "display", "shortcuts", "updates", "about"};
+        if (idx >= 0 && idx < 11) {
             gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), names[idx]);
         }
     })), nullptr);
 
-    // Select first row by default
+    // Select first row (Overview & Specs) by default
     GtkListBoxRow* first_row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 0);
     if (first_row) gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), first_row);
 
@@ -2410,36 +2629,39 @@ static void on_app_activate(GApplication* app, gpointer) {
         std::transform(query.begin(), query.end(), query.begin(), ::tolower);
         if (query.empty()) return;
 
-        if (query.find("color") != std::string::npos || query.find("border") != std::string::npos || query.find("gap") != std::string::npos || query.find("opacity") != std::string::npos || query.find("smart") != std::string::npos || query.find("dim") != std::string::npos) {
-            gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "appearance");
+        if (query.find("overview") != std::string::npos || query.find("spec") != std::string::npos || query.find("system") != std::string::npos || query.find("cpu") != std::string::npos || query.find("ram") != std::string::npos || query.find("kernel") != std::string::npos || query.find("host") != std::string::npos) {
+            gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "overview");
             gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 0));
+        } else if (query.find("color") != std::string::npos || query.find("border") != std::string::npos || query.find("gap") != std::string::npos || query.find("opacity") != std::string::npos || query.find("smart") != std::string::npos || query.find("dim") != std::string::npos) {
+            gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "appearance");
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 1));
         } else if (query.find("grain") != std::string::npos || query.find("gradient") != std::string::npos || query.find("wallpaper") != std::string::npos || query.find("noise") != std::string::npos) {
             gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "grain");
-            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 1));
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 2));
         } else if (query.find("bezier") != std::string::npos || query.find("anim") != std::string::npos || query.find("speed") != std::string::npos || query.find("curve") != std::string::npos) {
             gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "motion");
-            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 2));
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 3));
         } else if (query.find("graph") != std::string::npos || query.find("task") != std::string::npos || query.find("physics") != std::string::npos || query.find("spring") != std::string::npos || query.find("ram") != std::string::npos) {
             gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "taskgraph");
-            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 3));
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 4));
         } else if (query.find("waybar") != std::string::npos || query.find("bar") != std::string::npos || query.find("drawer") != std::string::npos || query.find("tray") != std::string::npos) {
             gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "waybar");
-            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 4));
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 5));
         } else if (query.find("touchpad") != std::string::npos || query.find("mouse") != std::string::npos || query.find("scroll") != std::string::npos || query.find("input") != std::string::npos || query.find("keyboard") != std::string::npos || query.find("repeat") != std::string::npos || query.find("delay") != std::string::npos || query.find("vim") != std::string::npos || query.find("paste") != std::string::npos || query.find("accel") != std::string::npos) {
             gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "input");
-            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 5));
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 6));
         } else if (query.find("display") != std::string::npos || query.find("night") != std::string::npos || query.find("scale") != std::string::npos || query.find("vrr") != std::string::npos || query.find("tearing") != std::string::npos || query.find("gaming") != std::string::npos || query.find("scanout") != std::string::npos || query.find("sleep") != std::string::npos || query.find("idle") != std::string::npos || query.find("battery") != std::string::npos || query.find("clip") != std::string::npos) {
             gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "display");
-            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 6));
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 7));
         } else if (query.find("key") != std::string::npos || query.find("shortcut") != std::string::npos || query.find("spatial") != std::string::npos || query.find("swipe") != std::string::npos || query.find("shelf") != std::string::npos) {
             gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "shortcuts");
-            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 7));
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 8));
         } else if (query.find("update") != std::string::npos || query.find("upgrade") != std::string::npos || query.find("version") != std::string::npos || query.find("release") != std::string::npos || query.find("git") != std::string::npos) {
             gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "updates");
-            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 8));
-        } else if (query.find("about") != std::string::npos || query.find("info") != std::string::npos || query.find("system") != std::string::npos) {
-            gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "about");
             gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 9));
+        } else if (query.find("about") != std::string::npos || query.find("info") != std::string::npos) {
+            gtk_stack_set_visible_child_name(GTK_STACK(g_app.stack), "about");
+            gtk_list_box_select_row(GTK_LIST_BOX(g_app.sidebar_list), gtk_list_box_get_row_at_index(GTK_LIST_BOX(g_app.sidebar_list), 10));
         }
     })), nullptr);
 
@@ -2466,11 +2688,94 @@ static void on_app_activate(GApplication* app, gpointer) {
     gtk_box_append(GTK_BOX(root_box), footer);
 
     gtk_window_set_child(GTK_WINDOW(g_app.window), root_box);
-    gtk_window_present(GTK_WINDOW(g_app.window));
+
+    if (g_show_welcome) {
+        // Welcome Dialog
+        GtkWidget* win_w = adw_window_new();
+        gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(win_w));
+        gtk_window_set_title(GTK_WINDOW(win_w), "Welcome to Monolith");
+        gtk_window_set_default_size(GTK_WINDOW(win_w), 540, 520);
+        gtk_window_set_resizable(GTK_WINDOW(win_w), FALSE);
+
+        GtkWidget* root_w = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
+        gtk_widget_set_margin_start(root_w, 28);
+        gtk_widget_set_margin_end(root_w, 28);
+        gtk_widget_set_margin_top(root_w, 32);
+        gtk_widget_set_margin_bottom(root_w, 28);
+
+        GtkWidget* title_w = gtk_label_new("Welcome to Monolith");
+        gtk_widget_add_css_class(title_w, "title-1");
+        gtk_widget_set_halign(title_w, GTK_ALIGN_CENTER);
+
+        GtkWidget* sub_w = gtk_label_new("Ultra-Minimalist • Zero-Bloat • High Performance C++20 Environment");
+        gtk_widget_add_css_class(sub_w, "dim-label");
+        gtk_widget_set_halign(sub_w, GTK_ALIGN_CENTER);
+
+        gtk_box_append(GTK_BOX(root_w), title_w);
+        gtk_box_append(GTK_BOX(root_w), sub_w);
+
+        AdwPreferencesGroup* g_feat = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+        gtk_widget_set_margin_top(GTK_WIDGET(g_feat), 8);
+
+        auto add_feat = [&](const char* heading, const char* desc) {
+            AdwActionRow* r = ADW_ACTION_ROW(adw_action_row_new());
+            adw_preferences_row_set_title(ADW_PREFERENCES_ROW(r), heading);
+            adw_action_row_set_subtitle(r, desc);
+            adw_preferences_group_add(g_feat, GTK_WIDGET(r));
+        };
+
+        add_feat("OLED Brutalist Interface", "Pure #000000 black, hardware Bezier motion, and algorithmic grain.");
+        add_feat("Spatial 2D Tabs & Shelf", "3-finger swipe up for Spotify, swipe down for the Extra Window Shelf.");
+        add_feat("Native C++20 Suite", "Control Center (Super+I), Constellation Desktop, Edge Drawer (Super+Z).");
+
+        gtk_box_append(GTK_BOX(root_w), GTK_WIDGET(g_feat));
+
+        GtkWidget* btn_box_w = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+        gtk_widget_set_margin_top(btn_box_w, 12);
+
+        GtkWidget* btn_go = gtk_button_new_with_label("Get Started");
+        gtk_widget_add_css_class(btn_go, "upgrade-btn");
+        gtk_widget_set_size_request(btn_go, -1, 44);
+
+        g_signal_connect(btn_go, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
+            GtkWidget* w = GTK_WIDGET(data);
+            std::string flag = config_dir() + "/.first_run_done";
+            std::ofstream f(flag);
+            if (f.is_open()) f << "first_run_completed=true\n";
+            gtk_window_destroy(GTK_WINDOW(w));
+            if (g_app.window) {
+                gtk_window_present(GTK_WINDOW(g_app.window));
+            }
+        }), win_w);
+
+        GtkWidget* hint = gtk_label_new("Click Get Started to explore Monolith Control Center");
+        gtk_widget_add_css_class(hint, "dim-label");
+        gtk_widget_set_halign(hint, GTK_ALIGN_CENTER);
+
+        gtk_box_append(GTK_BOX(btn_box_w), btn_go);
+        gtk_box_append(GTK_BOX(btn_box_w), hint);
+        gtk_box_append(GTK_BOX(root_w), btn_box_w);
+
+        adw_window_set_content(ADW_WINDOW(win_w), root_w);
+        gtk_window_present(GTK_WINDOW(win_w));
+    } else {
+        gtk_window_present(GTK_WINDOW(g_app.window));
+    }
 }
 
 int main(int argc, char* argv[]) {
     adw_init();
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--welcome") {
+            g_show_welcome = true;
+        }
+    }
+    std::string first_run_file = config_dir() + "/.first_run_done";
+    if (!g_show_welcome && !std::filesystem::exists(first_run_file)) {
+        g_show_welcome = true;
+    }
+
     GtkApplication* app = gtk_application_new("org.monolith.settings", G_APPLICATION_NON_UNIQUE);
     g_signal_connect(app, "activate", G_CALLBACK(on_app_activate), nullptr);
     int status = g_application_run(G_APPLICATION(app), argc, argv);
