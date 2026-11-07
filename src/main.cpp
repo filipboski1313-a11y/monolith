@@ -1215,6 +1215,43 @@ static GtkWidget* build_taskgraph_page() {
         g_app.s.taskgraph.auto_freeze = b;
     });
 
+    std::vector<std::string> out_items = {"All Displays", "Primary Only"};
+    std::vector<std::string> out_values = {"all", "primary"};
+
+    GdkDisplay* gdisp = gdk_display_get_default();
+    if (gdisp) {
+        GListModel* mons = gdk_display_get_monitors(gdisp);
+        if (mons) {
+            guint nm = g_list_model_get_n_items(mons);
+            for (guint i = 0; i < nm; ++i) {
+                GdkMonitor* m = GDK_MONITOR(g_list_model_get_item(mons, i));
+                if (m) {
+                    const char* conn = gdk_monitor_get_connector(m);
+                    if (conn) {
+                        out_items.push_back(std::string("Only ") + conn);
+                        out_values.push_back(conn);
+                    }
+                    g_object_unref(m);
+                }
+            }
+        }
+    }
+
+    int cur_out_idx = 0;
+    for (size_t i = 0; i < out_values.size(); ++i) {
+        if (out_values[i] == g_app.s.taskgraph.display_output) {
+            cur_out_idx = static_cast<int>(i);
+            break;
+        }
+    }
+
+    make_combo_row(g_tg, "Display Output", "Choose whether Constellation renders across all displays, primary only, or a specific screen", out_items, cur_out_idx, [out_values](int idx, const std::string&) {
+        if (idx >= 0 && idx < static_cast<int>(out_values.size())) {
+            g_app.s.taskgraph.display_output = out_values[idx];
+            g_app.s.save();
+        }
+    });
+
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(g_tg));
 
     // Group 2: Constellation Nodes & Warm-RAM Vault Manager

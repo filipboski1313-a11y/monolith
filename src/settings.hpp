@@ -134,6 +134,7 @@ struct Settings {
         double repulsion_radius = 620.0;
         double fuzzel_repulsion = 450.0;
         bool auto_freeze = true;
+        std::string display_output = "all"; // "all", "primary", or monitor connector name
     } taskgraph;
 
     // Display & Monitor Output
@@ -368,6 +369,7 @@ struct Settings {
                 taskgraph.node_radius = t.value("node_radius", taskgraph.node_radius);
                 taskgraph.repulsion_radius = t.value("repulsion_radius", taskgraph.repulsion_radius);
                 taskgraph.auto_freeze = t.value("auto_freeze", taskgraph.auto_freeze);
+                taskgraph.display_output = t.value("display_output", taskgraph.display_output);
             }
 
             if (j.contains("display_settings")) {
@@ -555,7 +557,8 @@ struct Settings {
             {"edge_alpha", taskgraph.edge_alpha},
             {"node_radius", taskgraph.node_radius},
             {"repulsion_radius", taskgraph.repulsion_radius},
-            {"auto_freeze", taskgraph.auto_freeze}
+            {"auto_freeze", taskgraph.auto_freeze},
+            {"display_output", taskgraph.display_output}
         };
 
         j["display_settings"] = {

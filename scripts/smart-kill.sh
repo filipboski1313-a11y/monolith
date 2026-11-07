@@ -5,7 +5,14 @@
 
 CFG="$HOME/.config/monolith/taskgraph/config.json"
 
-CUR_SPECIAL=$(hyprctl monitors -j 2>/dev/null | jq -r '.[0].specialWorkspace.name // ""')
+CUR_POS=$(hyprctl cursorpos 2>/dev/null | tr -d ',')
+CUR_X=$(echo "$CUR_POS" | awk '{print $1}')
+CUR_Y=$(echo "$CUR_POS" | awk '{print $2}')
+MON_JSON=$(hyprctl monitors -j 2>/dev/null)
+TARGET_MON=$(echo "$MON_JSON" | jq -c --argjson cx "${CUR_X:-0}" --argjson cy "${CUR_Y:-0}" '
+  (.[] | select($cx >= .x and $cx < (.x + .width) and $cy >= .y and $cy < (.y + .height))) // (.[] | select(.focused)) // .[0]
+')
+CUR_SPECIAL=$(echo "$TARGET_MON" | jq -r '.specialWorkspace.name // ""')
 if [ "$CUR_SPECIAL" = "special:ramvault" ]; then
     hyprctl dispatch togglespecialworkspace ramvault >/dev/null 2>&1
 fi

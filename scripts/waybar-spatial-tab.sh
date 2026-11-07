@@ -5,7 +5,8 @@
 # ══════════════════════════════════════════════════════════════════════════════
 
 MON_JSON=$(hyprctl monitors -j 2>/dev/null)
-CUR_SPECIAL=$(echo "$MON_JSON" | jq -r '.[0].specialWorkspace.name // ""')
+TARGET_MON=$(echo "$MON_JSON" | jq -c '(.[] | select(.focused)) // .[0]')
+CUR_SPECIAL=$(echo "$TARGET_MON" | jq -r '.specialWorkspace.name // ""')
 if [ "$CUR_SPECIAL" = "null" ]; then
     CUR_SPECIAL=""
 fi
@@ -15,6 +16,6 @@ if [ "$CUR_SPECIAL" = "special:spotify" ]; then
 elif [ "$CUR_SPECIAL" = "special:extra" ]; then
     echo '{"text": "▼ EXTRA", "class": "tab-extra", "tooltip": "Bottom Tab: Extra Shelf\n[L-Click] Close | 3 fingers swipe up to return"}'
 else
-    WS_ID=$(echo "$MON_JSON" | jq -r '.[0].activeWorkspace.id // 1')
+    WS_ID=$(echo "$TARGET_MON" | jq -r '.activeWorkspace.id // 1')
     echo "{\"text\": \"● DESKTOP\", \"class\": \"tab-desktop\", \"tooltip\": \"Workspace $WS_ID\n▲ 3 fingers swipe up: Spotify\n▼ 3 fingers swipe down: Extra Shelf\"}"
 fi

@@ -72,6 +72,12 @@ elif [ -f /etc/fedora-release ]; then
     else
         echo -e "${GREEN}All required Fedora packages are already installed.${NC}"
     fi
+
+    # Ensure Hyprland vendor dynamic libraries (e.g. libaquamarine) are accessible
+    if [ -d "/usr/libexec/hyprland/vendor/lib64" ]; then
+        echo "/usr/libexec/hyprland/vendor/lib64" > /etc/ld.so.conf.d/hyprland-vendor.conf
+        ldconfig 2>/dev/null || true
+    fi
 else
     echo -e "${RED}[Warning] Unsupported distribution. Please ensure dependencies are installed manually.${NC}"
 fi
@@ -171,6 +177,9 @@ echo -e "${BLUE}[7/7] Registering Monolith Wayland session in /usr/share/wayland
 tee /usr/local/bin/monolith-session > /dev/null << 'EOF'
 #!/usr/bin/env bash
 export PATH="${HOME}/.local/bin:${PATH}"
+if [ -d "/usr/libexec/hyprland/vendor/lib64" ]; then
+    export LD_LIBRARY_PATH="/usr/libexec/hyprland/vendor/lib64:${LD_LIBRARY_PATH}"
+fi
 export XDG_CURRENT_DESKTOP=Hyprland
 export XDG_SESSION_TYPE=wayland
 export XDG_SESSION_DESKTOP=Monolith

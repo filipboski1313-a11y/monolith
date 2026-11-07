@@ -104,6 +104,7 @@
   },
   "taskgraph": {
     "auto_freeze": true,
+    "display_output": "all",
     "center_gravity": 0.01,
     "damping": 0.9019230769230768,
     "drift_speed": 0.2,

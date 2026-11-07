@@ -78,10 +78,19 @@ struct AppEdge {
     double rest_length = 260.0;
 };
 
-struct GraphState {
+struct OutputWindow {
     GtkWidget* win = nullptr;
     GtkWidget* da = nullptr;
+    GdkMonitor* monitor = nullptr;
+    std::string name;
+    int width = 1920;
+    int height = 1080;
+    cairo_surface_t* bg_surface = nullptr;
+};
+
+struct GraphState {
     GtkIconTheme* icon_theme = nullptr;
+    GApplication* app = nullptr;
 
     std::vector<AppNode> nodes;
     std::vector<AppEdge> edges;
@@ -89,8 +98,11 @@ struct GraphState {
 
     cairo_surface_t* bg_surface = nullptr;
 
+    std::string display_output = "all";
+    std::vector<OutputWindow*> outputs;
+
     int screen_w = 1920;
-    int screen_h = 1200;
+    int screen_h = 1080;
 
     // Dynamic physics and visual settings loaded from settings.json
     double spring_k = 0.0042;
@@ -148,6 +160,15 @@ struct GraphState {
 static GraphState g_graph;
 
 static gboolean on_physics_tick(gpointer);
+static void sync_output_windows(GApplication* app);
+
+static void queue_all_outputs_redraw() {
+    for (auto* out : g_graph.outputs) {
+        if (out && out->da) {
+            gtk_widget_queue_draw(out->da);
+        }
+    }
+}
 
 static void ensure_physics_timer_running() {
     if (g_graph.physics_timer_id == 0) {
@@ -158,10 +179,8 @@ static void ensure_physics_timer_running() {
 static void wake_physics(double new_alpha = 0.65) {
     g_graph.alpha = std::max(g_graph.alpha, new_alpha);
     g_graph.physics_active = true;
-    if (!g_graph.is_covered || g_graph.fuzzel_active) {
-        ensure_physics_timer_running();
-        if (g_graph.da) gtk_widget_queue_draw(g_graph.da);
-    }
+    ensure_physics_timer_running();
+    queue_all_outputs_redraw();
 }
 
 static void exec_bg(const std::string& cmd) {
@@ -229,6 +248,38 @@ static GdkPixbuf* get_icon_pixbuf(const std::string& icon_name, int size = 24) {
     return pb;
 }
 
+static void rebuild_output_bg(OutputWindow* out) {
+    if (!out) return;
+    int w = std::max(out->width, 1280);
+    int h = std::max(out->height, 800);
+
+    if (out->bg_surface) {
+        int cur_w = cairo_image_surface_get_width(out->bg_surface);
+        int cur_h = cairo_image_surface_get_height(out->bg_surface);
+        if (cur_w != w || cur_h != h) {
+            cairo_surface_destroy(out->bg_surface);
+            out->bg_surface = nullptr;
+        }
+    }
+
+    if (!out->bg_surface) {
+        out->bg_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    }
+
+    render_procedural_grain_to_surface(
+        out->bg_surface,
+        g_graph.grain_algorithm,
+        g_graph.grain_intensity,
+        g_graph.grain_scale,
+        g_graph.gradient_type,
+        g_graph.color1,
+        g_graph.color2,
+        g_graph.color3,
+        g_graph.grain_tint,
+        g_graph.crosshair
+    );
+}
+
 static void rebuild_background_surface() {
     int w = std::max(g_graph.screen_w, 1280);
     int h = std::max(g_graph.screen_h, 800);
@@ -258,6 +309,10 @@ static void rebuild_background_surface() {
         g_graph.grain_tint,
         g_graph.crosshair
     );
+
+    for (auto* out : g_graph.outputs) {
+        rebuild_output_bg(out);
+    }
 }
 
 static void load_monolith_settings() {
@@ -303,6 +358,8 @@ static void load_monolith_settings() {
 
         if (j.contains("taskgraph")) {
             auto& tg = j["taskgraph"];
+            std::string prev_out = g_graph.display_output;
+            g_graph.display_output = tg.value("display_output", g_graph.display_output);
             g_graph.spring_k = tg.value("spring_k", g_graph.spring_k);
             g_graph.rest_length = tg.value("rest_length", g_graph.rest_length);
             g_graph.repulsion = tg.value("repulsion", g_graph.repulsion);
@@ -318,6 +375,10 @@ static void load_monolith_settings() {
 
             for (auto& n : g_graph.nodes) {
                 n.radius = g_graph.node_radius;
+            }
+
+            if (g_graph.display_output != prev_out && g_graph.app) {
+                sync_output_windows(g_graph.app);
             }
         }
 
@@ -546,36 +607,36 @@ static std::string format_ws_badge(int ws_id, const std::string& ws_name) {
 static void check_desktop_state() {
     g_graph.state_check_queued.store(false);
 
-    int active_ws_id = 1;
-    bool has_fullscreen = false;
-    bool special_open = false;
-    std::string active_special_name;
+    std::unordered_map<std::string, int> mon_active_ws;
+    std::unordered_map<std::string, std::string> mon_special_ws;
 
     // 1. Query monitors & activeworkspace directly via HyprIPC socket (< 0.05ms, 0 forks)
     std::string mon_raw = HyprIPC::request("j/monitors");
     if (!mon_raw.empty()) {
         try {
             json mj = json::parse(mon_raw);
-            if (mj.is_array() && !mj.empty()) {
-                active_ws_id = mj[0].value("activeWorkspace", json::object()).value("id", 1);
-                std::string sp = mj[0].value("specialWorkspace", json::object()).value("name", "");
-                if (sp == "special:ramvault") {
-                    // Never allow the internal RAM Vault special workspace to stay open as an overlay
-                    HyprIPC::dispatch("togglespecialworkspace ramvault");
-                } else if (!sp.empty() && sp != "null") {
-                    special_open = true;
-                    active_special_name = sp;
+            if (mj.is_array()) {
+                for (const auto& mon : mj) {
+                    std::string mname = mon.value("name", "");
+                    int mws = mon.value("activeWorkspace", json::object()).value("id", 1);
+                    std::string sp = mon.value("specialWorkspace", json::object()).value("name", "");
+                    mon_active_ws[mname] = mws;
+                    mon_special_ws[mname] = sp;
+
+                    if (sp == "special:ramvault") {
+                        HyprIPC::dispatch("togglespecialworkspace ramvault");
+                    }
                 }
             }
         } catch (...) {}
     }
 
     std::string ws_raw = HyprIPC::request("j/activeworkspace");
+    int active_ws_id = 1;
     if (!ws_raw.empty()) {
         try {
             json wj = json::parse(ws_raw);
-            active_ws_id = wj.value("id", active_ws_id);
-            has_fullscreen = wj.value("hasfullscreen", false);
+            active_ws_id = wj.value("id", 1);
         } catch (...) {}
     }
     if (active_ws_id > 0) {
@@ -592,8 +653,8 @@ static void check_desktop_state() {
         std::unordered_set<std::string> active_addresses;
         std::unordered_map<std::string, json> unpinned_candidates;
 
-        int total_on_active_ws = 0;
-        int floating_on_active_ws = 0;
+        std::unordered_map<int, int> tiled_on_ws;
+        std::unordered_map<int, bool> fullscreen_on_ws;
         int extra_ws_count = 0;
 
         for (auto& n : g_graph.nodes) {
@@ -613,14 +674,15 @@ static void check_desktop_state() {
             int ws = c.value("workspace", json::object()).value("id", 1);
             std::string ws_name = c.value("workspace", json::object()).value("name", "");
             bool is_floating = c.value("floating", false);
+            bool is_fullscreen = c.value("fullscreen", false);
 
             if (ws_name == "special:extra") {
                 extra_ws_count++;
             }
 
-            if (ws == active_ws_id && ws_name.rfind("special:", 0) != 0) {
-                total_on_active_ws++;
-                if (is_floating) floating_on_active_ws++;
+            if (is_fullscreen) fullscreen_on_ws[ws] = true;
+            if (!is_floating && ws_name.rfind("special:", 0) != 0) {
+                tiled_on_ws[ws]++;
             }
 
             active_addresses.insert(addr);
@@ -649,16 +711,29 @@ static void check_desktop_state() {
             }
         }
 
-        // Intelligent Desktop Coverage Determination
-        bool newly_covered = false;
-        if (g_graph.auto_freeze) {
-            if (has_fullscreen || special_open) {
-                newly_covered = true;
-            } else if (total_on_active_ws > 0 && floating_on_active_ws == 0) {
-                newly_covered = true;
+        // Intelligent Multi-Monitor Desktop Coverage Determination
+        bool all_outputs_covered = true;
+        if (g_graph.auto_freeze && !g_graph.outputs.empty()) {
+            for (auto* out : g_graph.outputs) {
+                if (!out) continue;
+                std::string mname = out->name;
+                int ws = mon_active_ws.count(mname) ? mon_active_ws[mname] : active_ws_id;
+                std::string sp = mon_special_ws.count(mname) ? mon_special_ws[mname] : "";
+
+                bool this_mon_special = (!sp.empty() && sp != "null" && sp != "special:ramvault");
+                bool this_mon_fs = fullscreen_on_ws[ws];
+                bool this_mon_tiled = (tiled_on_ws[ws] > 0);
+
+                if (!this_mon_special && !this_mon_fs && !this_mon_tiled) {
+                    all_outputs_covered = false; // At least one screen showing the graph is uncovered!
+                    break;
+                }
             }
+        } else {
+            all_outputs_covered = false;
         }
 
+        bool newly_covered = all_outputs_covered;
         if (newly_covered != g_graph.is_covered) {
             g_graph.is_covered = newly_covered;
             if (!g_graph.is_covered) {
@@ -771,8 +846,8 @@ static void check_desktop_state() {
 
         if (topology_changed) {
             wake_physics(0.65);
-        } else if (!g_graph.is_covered && g_graph.da) {
-            gtk_widget_queue_draw(g_graph.da);
+        } else if (!g_graph.is_covered) {
+            queue_all_outputs_redraw();
         }
     } catch (...) {}
 }
@@ -822,10 +897,16 @@ static void hypr_socket_listener_thread() {
                 if (!mraw.empty()) {
                     try {
                         json mj = json::parse(mraw);
-                        if (mj.is_array() && !mj.empty()) {
-                            std::string sp = mj[0].value("specialWorkspace", json::object()).value("name", "");
-                            if (sp.rfind("special:", 0) == 0) {
-                                HyprIPC::dispatch("togglespecialworkspace " + sp.substr(8));
+                        if (mj.is_array()) {
+                            for (const auto& mon : mj) {
+                                std::string sp = mon.value("specialWorkspace", json::object()).value("name", "");
+                                if (sp.rfind("special:", 0) == 0 && sp != "special:ramvault") {
+                                    std::string mon_name = mon.value("name", "");
+                                    if (!mon_name.empty()) {
+                                        HyprIPC::dispatch("focusmonitor " + mon_name);
+                                    }
+                                    HyprIPC::dispatch("togglespecialworkspace " + sp.substr(8));
+                                }
                             }
                         }
                     } catch (...) {}
@@ -1137,24 +1218,34 @@ static void draw_rounded_rect(cairo_t* cr, double x, double y, double w, double 
     cairo_close_path(cr);
 }
 
-static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpointer) {
-    if (width != g_graph.screen_w || height != g_graph.screen_h) {
-        g_graph.screen_w = width;
-        g_graph.screen_h = height;
-        rebuild_background_surface();
+static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpointer user_data) {
+    OutputWindow* out = static_cast<OutputWindow*>(user_data);
+    if (out) {
+        if (width != out->width || height != out->height) {
+            out->width = width;
+            out->height = height;
+            rebuild_output_bg(out);
+        }
     }
 
     // ──────────────── 0. UNIFIED PROCEDURAL GRADIENT + GRAIN BASE ────────────
-    if (g_graph.bg_surface) {
+    cairo_surface_t* bg = (out && out->bg_surface) ? out->bg_surface : g_graph.bg_surface;
+    if (bg) {
         cairo_save(cr);
         cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-        cairo_set_source_surface(cr, g_graph.bg_surface, 0, 0);
+        cairo_set_source_surface(cr, bg, 0, 0);
         cairo_paint(cr);
         cairo_restore(cr);
     } else {
         cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
         cairo_paint(cr);
     }
+
+    double scale_x = (g_graph.screen_w > 0) ? ((double)width / (double)g_graph.screen_w) : 1.0;
+    double scale_y = (g_graph.screen_h > 0) ? ((double)height / (double)g_graph.screen_h) : 1.0;
+
+    cairo_save(cr);
+    cairo_scale(cr, scale_x, scale_y);
 
     std::unordered_map<std::string, const AppNode*> id_map;
     for (const auto& n : g_graph.nodes) id_map[n.id] = &n;
@@ -1441,6 +1532,8 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
             draw_menu_row(4, "■  Close Running Window", 0.97, 0.44, 0.44);
         }
     }
+
+    cairo_restore(cr);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1480,15 +1573,24 @@ static void focus_or_launch_node(const AppNode& node) {
     }
 }
 
-static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpointer) {
+static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpointer user_data) {
+    OutputWindow* out = static_cast<OutputWindow*>(user_data);
+    g_graph.is_covered = false;
+    ensure_physics_timer_running();
+
+    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
+    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
+    double rx = start_x * sx;
+    double ry = start_y * sy;
+
     g_graph.dragged_node_idx = -1;
 
     if (g_graph.menu_open && g_graph.menu_node_idx >= 0 && g_graph.menu_node_idx < static_cast<int>(g_graph.nodes.size())) {
         double mx = std::clamp(g_graph.menu_x, 15.0, g_graph.screen_w - g_graph.menu_w - 15.0);
         double my = std::clamp(g_graph.menu_y, 42.0, g_graph.screen_h - g_graph.menu_h - 15.0);
 
-        if (start_x >= mx && start_x <= mx + g_graph.menu_w && start_y >= my + 40.0 && start_y <= my + g_graph.menu_h) {
-            int clicked_item = static_cast<int>((start_y - (my + 40.0)) / 32.0);
+        if (rx >= mx && rx <= mx + g_graph.menu_w && ry >= my + 40.0 && ry <= my + g_graph.menu_h) {
+            int clicked_item = static_cast<int>((ry - (my + 40.0)) / 32.0);
             auto& target_node = g_graph.nodes[g_graph.menu_node_idx];
 
             if (clicked_item == 0) {
@@ -1525,20 +1627,20 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
 
             g_graph.menu_open = false;
             g_graph.menu_node_idx = -1;
-            if (g_graph.da) gtk_widget_queue_draw(g_graph.da);
+            queue_all_outputs_redraw();
             return;
         } else {
             g_graph.menu_open = false;
             g_graph.menu_node_idx = -1;
-            if (g_graph.da) gtk_widget_queue_draw(g_graph.da);
+            queue_all_outputs_redraw();
             return;
         }
     }
 
-    int idx = hit_test_node(start_x, start_y);
+    int idx = hit_test_node(rx, ry);
     g_graph.dragged_node_idx = idx;
-    g_graph.drag_start_x = start_x;
-    g_graph.drag_start_y = start_y;
+    g_graph.drag_start_x = rx;
+    g_graph.drag_start_y = ry;
     g_graph.drag_dist = 0.0;
 
     if (idx >= 0) {
@@ -1549,12 +1651,16 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
     }
 }
 
-static void on_drag_update(GtkGestureDrag*, double offset_x, double offset_y, gpointer) {
+static void on_drag_update(GtkGestureDrag*, double offset_x, double offset_y, gpointer user_data) {
+    OutputWindow* out = static_cast<OutputWindow*>(user_data);
+    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
+    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
+
     if (g_graph.dragged_node_idx >= 0 && g_graph.dragged_node_idx < static_cast<int>(g_graph.nodes.size())) {
         auto& node = g_graph.nodes[g_graph.dragged_node_idx];
-        node.x = g_graph.drag_start_x + offset_x;
-        node.y = g_graph.drag_start_y + offset_y;
-        g_graph.drag_dist = std::hypot(offset_x, offset_y);
+        node.x = g_graph.drag_start_x + offset_x * sx;
+        node.y = g_graph.drag_start_y + offset_y * sy;
+        g_graph.drag_dist = std::hypot(offset_x * sx, offset_y * sy);
         wake_physics(0.45);
     }
 }
@@ -1573,24 +1679,42 @@ static void on_drag_end(GtkGestureDrag*, double, double, gpointer) {
     wake_physics(0.5);
 }
 
-static void on_right_click(GtkGestureClick*, int, double x, double y, gpointer) {
-    int idx = hit_test_node(x, y);
+static void on_right_click(GtkGestureClick*, int, double x, double y, gpointer user_data) {
+    OutputWindow* out = static_cast<OutputWindow*>(user_data);
+    g_graph.is_covered = false;
+    ensure_physics_timer_running();
+
+    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
+    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
+    double rx = x * sx;
+    double ry = y * sy;
+
+    int idx = hit_test_node(rx, ry);
     if (idx >= 0) {
         g_graph.menu_open = true;
         g_graph.menu_node_idx = idx;
-        g_graph.menu_x = x + 12.0;
-        g_graph.menu_y = y + 12.0;
+        g_graph.menu_x = rx + 12.0;
+        g_graph.menu_y = ry + 12.0;
         g_graph.menu_hovered_item = -1;
-        if (g_graph.da) gtk_widget_queue_draw(g_graph.da);
+        queue_all_outputs_redraw();
     } else if (g_graph.menu_open) {
         g_graph.menu_open = false;
         g_graph.menu_node_idx = -1;
-        if (g_graph.da) gtk_widget_queue_draw(g_graph.da);
+        queue_all_outputs_redraw();
     }
 }
 
-static void on_middle_click(GtkGestureClick*, int, double x, double y, gpointer) {
-    int idx = hit_test_node(x, y);
+static void on_middle_click(GtkGestureClick*, int, double x, double y, gpointer user_data) {
+    OutputWindow* out = static_cast<OutputWindow*>(user_data);
+    g_graph.is_covered = false;
+    ensure_physics_timer_running();
+
+    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
+    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
+    double rx = x * sx;
+    double ry = y * sy;
+
+    int idx = hit_test_node(rx, ry);
     if (idx >= 0 && g_graph.nodes[idx].is_running && !g_graph.nodes[idx].hypr_address.empty()) {
         auto& n = g_graph.nodes[idx];
         if (n.workspace_label == "E") {
@@ -1603,25 +1727,34 @@ static void on_middle_click(GtkGestureClick*, int, double x, double y, gpointer)
     }
 }
 
-static void on_motion(GtkEventControllerMotion*, double x, double y, gpointer) {
+static void on_motion(GtkEventControllerMotion*, double x, double y, gpointer user_data) {
+    OutputWindow* out = static_cast<OutputWindow*>(user_data);
+    g_graph.is_covered = false;
+    ensure_physics_timer_running();
+
+    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
+    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
+    double rx = x * sx;
+    double ry = y * sy;
+
     if (g_graph.menu_open) {
         double mx = std::clamp(g_graph.menu_x, 15.0, g_graph.screen_w - g_graph.menu_w - 15.0);
         double my = std::clamp(g_graph.menu_y, 42.0, g_graph.screen_h - g_graph.menu_h - 15.0);
 
-        if (x >= mx && x <= mx + g_graph.menu_w && y >= my + 40.0 && y <= my + g_graph.menu_h) {
-            int item = static_cast<int>((y - (my + 40.0)) / 32.0);
+        if (rx >= mx && rx <= mx + g_graph.menu_w && ry >= my + 40.0 && ry <= my + g_graph.menu_h) {
+            int item = static_cast<int>((ry - (my + 40.0)) / 32.0);
             if (item != g_graph.menu_hovered_item) {
                 g_graph.menu_hovered_item = item;
-                if (g_graph.da) gtk_widget_queue_draw(g_graph.da);
+                queue_all_outputs_redraw();
             }
             return;
         } else if (g_graph.menu_hovered_item != -1) {
             g_graph.menu_hovered_item = -1;
-            if (g_graph.da) gtk_widget_queue_draw(g_graph.da);
+            queue_all_outputs_redraw();
         }
     }
 
-    int hovered_idx = hit_test_node(x, y);
+    int hovered_idx = hit_test_node(rx, ry);
     bool changed = false;
     for (size_t i = 0; i < g_graph.nodes.size(); ++i) {
         bool h = (static_cast<int>(i) == hovered_idx);
@@ -1635,15 +1768,144 @@ static void on_motion(GtkEventControllerMotion*, double x, double y, gpointer) {
         wake_physics(0.35);
     }
 
-    GtkNative* native = gtk_widget_get_native(g_graph.da);
-    if (native) {
-        GdkSurface* surf = gtk_native_get_surface(native);
-        if (surf) {
-            GdkCursor* cur = gdk_cursor_new_from_name((hovered_idx >= 0 || g_graph.menu_open) ? "pointer" : "default", nullptr);
-            gdk_surface_set_cursor(surf, cur);
-            g_object_unref(cur);
+    if (out && out->da) {
+        GtkNative* native = gtk_widget_get_native(out->da);
+        if (native) {
+            GdkSurface* surf = gtk_native_get_surface(native);
+            if (surf) {
+                GdkCursor* cur = gdk_cursor_new_from_name((hovered_idx >= 0 || g_graph.menu_open) ? "pointer" : "default", nullptr);
+                gdk_surface_set_cursor(surf, cur);
+                g_object_unref(cur);
+            }
         }
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// APPLICATION ACTIVATION & MULTI-MONITOR LAYER SHELL
+// ──────────────────────────────────────────────────────────────────────────────
+static void sync_output_windows(GApplication* app) {
+    if (!app) return;
+    GdkDisplay* display = gdk_display_get_default();
+    if (!display) return;
+    GListModel* monitors = gdk_display_get_monitors(display);
+    if (!monitors) return;
+    guint n_monitors = g_list_model_get_n_items(monitors);
+    if (n_monitors == 0) return;
+
+    GdkMonitor* mon0 = GDK_MONITOR(g_list_model_get_item(monitors, 0));
+    if (mon0) {
+        GdkRectangle geom;
+        gdk_monitor_get_geometry(mon0, &geom);
+        if (geom.width > 0 && geom.height > 0) {
+            g_graph.screen_w = geom.width;
+            g_graph.screen_h = geom.height;
+        }
+        g_object_unref(mon0);
+    }
+
+    std::string mode = g_graph.display_output;
+    if (mode.empty()) mode = "all";
+
+    std::vector<OutputWindow*> retained;
+
+    for (guint i = 0; i < n_monitors; ++i) {
+        GdkMonitor* mon = GDK_MONITOR(g_list_model_get_item(monitors, i));
+        if (!mon) continue;
+        const char* conn = gdk_monitor_get_connector(mon);
+        std::string conn_name = conn ? conn : ("Output-" + std::to_string(i));
+
+        bool want = false;
+        if (mode == "all") {
+            want = true;
+        } else if (mode == "primary") {
+            want = (i == 0);
+        } else if (mode == conn_name) {
+            want = true;
+        }
+
+        OutputWindow* existing = nullptr;
+        for (auto* out : g_graph.outputs) {
+            if (out && (out->monitor == mon || out->name == conn_name)) {
+                existing = out;
+                break;
+            }
+        }
+
+        if (want) {
+            if (existing) {
+                retained.push_back(existing);
+            } else {
+                OutputWindow* out = new OutputWindow();
+                out->monitor = mon;
+                g_object_ref(mon);
+                out->name = conn_name;
+
+                GdkRectangle geom;
+                gdk_monitor_get_geometry(mon, &geom);
+                out->width = geom.width > 0 ? geom.width : 1920;
+                out->height = geom.height > 0 ? geom.height : 1080;
+
+                out->win = gtk_window_new();
+                gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(out->win));
+
+                gtk_layer_init_for_window(GTK_WINDOW(out->win));
+                gtk_layer_set_monitor(GTK_WINDOW(out->win), mon);
+                gtk_layer_set_layer(GTK_WINDOW(out->win), GTK_LAYER_SHELL_LAYER_BOTTOM);
+                gtk_layer_set_exclusive_zone(GTK_WINDOW(out->win), -1);
+                gtk_layer_set_keyboard_mode(GTK_WINDOW(out->win), GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+                gtk_layer_set_namespace(GTK_WINDOW(out->win), "monolith-constellation");
+
+                gtk_layer_set_anchor(GTK_WINDOW(out->win), GTK_LAYER_SHELL_EDGE_TOP, TRUE);
+                gtk_layer_set_anchor(GTK_WINDOW(out->win), GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+                gtk_layer_set_anchor(GTK_WINDOW(out->win), GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
+                gtk_layer_set_anchor(GTK_WINDOW(out->win), GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
+
+                gtk_widget_add_css_class(out->win, "taskgraph-window");
+
+                out->da = gtk_drawing_area_new();
+                gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(out->da), draw_graph, out, nullptr);
+                gtk_window_set_child(GTK_WINDOW(out->win), out->da);
+
+                GtkGesture* drag = gtk_gesture_drag_new();
+                g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), out);
+                g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), out);
+                g_signal_connect(drag, "drag-end", G_CALLBACK(on_drag_end), out);
+                gtk_widget_add_controller(out->da, GTK_EVENT_CONTROLLER(drag));
+
+                GtkGesture* right_click = gtk_gesture_click_new();
+                gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(right_click), GDK_BUTTON_SECONDARY);
+                g_signal_connect(right_click, "pressed", G_CALLBACK(on_right_click), out);
+                gtk_widget_add_controller(out->da, GTK_EVENT_CONTROLLER(right_click));
+
+                GtkGesture* middle_click = gtk_gesture_click_new();
+                gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(middle_click), GDK_BUTTON_MIDDLE);
+                g_signal_connect(middle_click, "pressed", G_CALLBACK(on_middle_click), out);
+                gtk_widget_add_controller(out->da, GTK_EVENT_CONTROLLER(middle_click));
+
+                GtkEventController* motion = gtk_event_controller_motion_new();
+                g_signal_connect(motion, "motion", G_CALLBACK(on_motion), out);
+                gtk_widget_add_controller(out->da, motion);
+
+                rebuild_output_bg(out);
+                gtk_window_present(GTK_WINDOW(out->win));
+
+                retained.push_back(out);
+            }
+        } else {
+            if (existing) {
+                gtk_window_destroy(GTK_WINDOW(existing->win));
+                if (existing->bg_surface) cairo_surface_destroy(existing->bg_surface);
+                if (existing->monitor) g_object_unref(existing->monitor);
+                delete existing;
+            }
+        }
+        g_object_unref(mon);
+    }
+
+    g_graph.outputs = retained;
+    check_desktop_state();
+    wake_physics(0.5);
 }
 
 static gboolean on_physics_tick(gpointer) {
@@ -1655,8 +1917,8 @@ static gboolean on_physics_tick(gpointer) {
         check_popup_state();
     }
 
-    // TRUE ZERO-CPU SLEEP: If desktop is covered and no overlay menu is active, stop timer completely!
-    if (g_graph.is_covered && !g_graph.fuzzel_active && !g_popup_rep.active && g_popup_rep.smooth_weight < 0.01 && g_graph.return_timer <= 0.0) {
+    // TRUE ZERO-CPU SLEEP: Only stop timer completely if ALL displayed monitors are covered AND no user interaction
+    if (g_graph.auto_freeze && g_graph.is_covered && !g_graph.fuzzel_active && !g_popup_rep.active && g_popup_rep.smooth_weight < 0.01 && g_graph.return_timer <= 0.0) {
         g_graph.physics_timer_id = 0;
         return G_SOURCE_REMOVE;
     }
@@ -1684,30 +1946,12 @@ static gboolean on_physics_tick(gpointer) {
     }
 
     update_physics();
-    if (g_graph.da) gtk_widget_queue_draw(g_graph.da);
+    queue_all_outputs_redraw();
     return G_SOURCE_CONTINUE;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// APPLICATION ACTIVATION & LAYER SHELL
-// ──────────────────────────────────────────────────────────────────────────────
 static void on_activate(GApplication* app, gpointer) {
-    GdkDisplay* display = gdk_display_get_default();
-    if (display) {
-        GListModel* monitors = gdk_display_get_monitors(display);
-        if (monitors && g_list_model_get_n_items(monitors) > 0) {
-            GdkMonitor* mon = GDK_MONITOR(g_list_model_get_item(monitors, 0));
-            if (mon) {
-                GdkRectangle geom;
-                gdk_monitor_get_geometry(mon, &geom);
-                if (geom.width > 0 && geom.height > 0) {
-                    g_graph.screen_w = geom.width;
-                    g_graph.screen_h = geom.height;
-                }
-                g_object_unref(mon);
-            }
-        }
-    }
+    g_graph.app = app;
 
     // Load pinned nodes first, then apply authoritative settings.json parameters & build background
     load_config(false);
@@ -1723,51 +1967,19 @@ static void on_activate(GApplication* app, gpointer) {
     );
     g_object_unref(provider);
 
-    g_graph.win = gtk_window_new();
-    gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(g_graph.win));
+    sync_output_windows(app);
 
-    gtk_layer_init_for_window(GTK_WINDOW(g_graph.win));
-    gtk_layer_set_layer(GTK_WINDOW(g_graph.win), GTK_LAYER_SHELL_LAYER_BOTTOM);
-    gtk_layer_set_exclusive_zone(GTK_WINDOW(g_graph.win), -1);
-    gtk_layer_set_keyboard_mode(GTK_WINDOW(g_graph.win), GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
-    gtk_layer_set_namespace(GTK_WINDOW(g_graph.win), "monolith-constellation");
+    GdkDisplay* display = gdk_display_get_default();
+    if (display) {
+        GListModel* monitors = gdk_display_get_monitors(display);
+        if (monitors) {
+            g_signal_connect(monitors, "items-changed", G_CALLBACK(+[](GListModel*, guint, guint, guint, gpointer data) {
+                sync_output_windows(G_APPLICATION(data));
+            }), app);
+        }
+    }
 
-    gtk_layer_set_anchor(GTK_WINDOW(g_graph.win), GTK_LAYER_SHELL_EDGE_TOP, TRUE);
-    gtk_layer_set_anchor(GTK_WINDOW(g_graph.win), GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
-    gtk_layer_set_anchor(GTK_WINDOW(g_graph.win), GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
-    gtk_layer_set_anchor(GTK_WINDOW(g_graph.win), GTK_LAYER_SHELL_EDGE_RIGHT, TRUE);
-
-    gtk_widget_add_css_class(g_graph.win, "taskgraph-window");
-
-    g_graph.da = gtk_drawing_area_new();
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(g_graph.da), draw_graph, nullptr, nullptr);
-    gtk_window_set_child(GTK_WINDOW(g_graph.win), g_graph.da);
-
-    GtkGesture* drag = gtk_gesture_drag_new();
-    g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), nullptr);
-    g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), nullptr);
-    g_signal_connect(drag, "drag-end", G_CALLBACK(on_drag_end), nullptr);
-    gtk_widget_add_controller(g_graph.da, GTK_EVENT_CONTROLLER(drag));
-
-    GtkGesture* right_click = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(right_click), GDK_BUTTON_SECONDARY);
-    g_signal_connect(right_click, "pressed", G_CALLBACK(on_right_click), nullptr);
-    gtk_widget_add_controller(g_graph.da, GTK_EVENT_CONTROLLER(right_click));
-
-    GtkGesture* middle_click = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(middle_click), GDK_BUTTON_MIDDLE);
-    g_signal_connect(middle_click, "pressed", G_CALLBACK(on_middle_click), nullptr);
-    gtk_widget_add_controller(g_graph.da, GTK_EVENT_CONTROLLER(middle_click));
-
-    GtkEventController* motion = gtk_event_controller_motion_new();
-    g_signal_connect(motion, "motion", G_CALLBACK(on_motion), nullptr);
-    gtk_widget_add_controller(g_graph.da, motion);
-
-    gtk_window_present(GTK_WINDOW(g_graph.win));
-
-    check_desktop_state();
     ensure_physics_timer_running();
-
     std::thread(hypr_socket_listener_thread).detach();
 }
 
