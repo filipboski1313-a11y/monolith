@@ -12,6 +12,7 @@
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
+#include <memory>
 
 namespace fs = std::filesystem;
 
@@ -33,8 +34,6 @@ struct Stroke {
 
 struct AppState {
     GtkApplication* app = nullptr;
-    GtkWidget* left_trigger = nullptr;
-    GtkWidget* right_trigger = nullptr;
 
     struct TriggerState {
         std::string edge;
@@ -42,9 +41,17 @@ struct AppState {
         double cursor_y = 90.0;
         guint dwell_timer = 0;
         GtkWidget* da = nullptr;
+        GdkMonitor* monitor = nullptr;
     };
-    TriggerState left_trig{"left", false, 90.0, 0, nullptr};
-    TriggerState right_trig{"right", false, 90.0, 0, nullptr};
+
+    struct MonitorTriggers {
+        GdkMonitor* monitor = nullptr;
+        GtkWidget* left_win = nullptr;
+        GtkWidget* right_win = nullptr;
+        std::unique_ptr<TriggerState> left_trig;
+        std::unique_ptr<TriggerState> right_trig;
+    };
+    std::vector<MonitorTriggers> monitor_triggers;
 
     GtkWidget* popup_win = nullptr;
     GtkWidget* revealer = nullptr;
@@ -101,8 +108,8 @@ struct AppState {
     std::string notes_path;
 } g_state;
 
-static void show_popup(const std::string& edge);
-static void toggle_popup(const std::string& edge);
+static void show_popup(const std::string& edge, GdkMonitor* mon = nullptr);
+static void toggle_popup(const std::string& edge, GdkMonitor* mon = nullptr);
 static void hide_popup();
 static void switch_tab(const std::string& tab_id);
 
@@ -1058,11 +1065,55 @@ static void create_popup_window() {
     gtk_widget_add_controller(g_state.popup_win, key_ctrl);
 }
 
-static void show_popup(const std::string& edge) {
+static GdkMonitor* get_active_monitor() {
+    GdkDisplay* display = gdk_display_get_default();
+    if (!display) return nullptr;
+    GListModel* mons = gdk_display_get_monitors(display);
+    if (!mons) return nullptr;
+    guint count = g_list_model_get_n_items(mons);
+    if (count == 0) return nullptr;
+
+    FILE* fp = popen("hyprctl activeworkspace -j 2>/dev/null", "r");
+    if (fp) {
+        std::string out;
+        char buf[256];
+        while (fgets(buf, sizeof(buf), fp)) out += buf;
+        pclose(fp);
+        auto pos = out.find("\"monitor\": \"");
+        if (pos != std::string::npos) {
+            pos += 12;
+            auto end_pos = out.find("\"", pos);
+            if (end_pos != std::string::npos) {
+                std::string mon_name = out.substr(pos, end_pos - pos);
+                for (guint i = 0; i < count; ++i) {
+                    GdkMonitor* m = GDK_MONITOR(g_list_model_get_item(mons, i));
+                    const char* conn = gdk_monitor_get_connector(m);
+                    if (conn && mon_name == conn) {
+                        g_object_unref(m);
+                        return m;
+                    }
+                    g_object_unref(m);
+                }
+            }
+        }
+    }
+    GdkMonitor* first = GDK_MONITOR(g_list_model_get_item(mons, 0));
+    if (first) g_object_unref(first);
+    return first;
+}
+
+static void show_popup(const std::string& edge, GdkMonitor* mon) {
     if (!g_state.popup_win) create_popup_window();
     if (g_state.hide_timer > 0) {
         g_source_remove(g_state.hide_timer);
         g_state.hide_timer = 0;
+    }
+
+    if (!mon) {
+        mon = get_active_monitor();
+    }
+    if (mon) {
+        gtk_layer_set_monitor(GTK_WINDOW(g_state.popup_win), mon);
     }
 
     g_state.current_edge = edge;
@@ -1115,17 +1166,20 @@ static void hide_popup() {
     }, nullptr);
 }
 
-static void toggle_popup(const std::string& edge) {
+static void toggle_popup(const std::string& edge, GdkMonitor* mon) {
     if (g_state.popup_visible) hide_popup();
-    else show_popup(edge);
+    else show_popup(edge, mon);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // FULL-EDGE REACTIVE HANDLE (Hover shows indicator pill • Left-Click opens drawer)
 // ──────────────────────────────────────────────────────────────────────────────
-static GtkWidget* create_edge_trigger(const std::string& edge) {
+static GtkWidget* create_edge_trigger(const std::string& edge, GdkMonitor* mon, AppState::TriggerState* ts) {
     GtkWidget* win = gtk_window_new();
     gtk_layer_init_for_window(GTK_WINDOW(win));
+    if (mon) {
+        gtk_layer_set_monitor(GTK_WINDOW(win), mon);
+    }
     gtk_layer_set_layer(GTK_WINDOW(win), GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_exclusive_zone(GTK_WINDOW(win), 0);
     gtk_layer_set_keyboard_mode(GTK_WINDOW(win), GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
@@ -1149,8 +1203,9 @@ static GtkWidget* create_edge_trigger(const std::string& edge) {
     gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(da), 3);
     gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(da), 100);
 
-    auto& trig_state = (edge == "left") ? g_state.left_trig : g_state.right_trig;
-    trig_state.da = da;
+    ts->da = da;
+    ts->edge = edge;
+    ts->monitor = mon;
 
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(da), +[](GtkDrawingArea*, cairo_t* cr, int, int height, gpointer user_data) {
         cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
@@ -1176,7 +1231,7 @@ static GtkWidget* create_edge_trigger(const std::string& edge) {
 
         cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.95);
         cairo_fill(cr);
-    }, &trig_state, nullptr);
+    }, ts, nullptr);
 
     gtk_window_set_child(GTK_WINDOW(win), da);
 
@@ -1187,31 +1242,68 @@ static GtkWidget* create_edge_trigger(const std::string& edge) {
         ts->hovered = true;
         ts->cursor_y = y;
         gtk_widget_queue_draw(ts->da);
-    }), &trig_state);
+    }), ts);
 
     g_signal_connect(motion, "motion", G_CALLBACK(+[](GtkEventControllerMotion*, double, double y, gpointer user_data) {
         auto* ts = static_cast<AppState::TriggerState*>(user_data);
         ts->hovered = true;
         ts->cursor_y = y;
         gtk_widget_queue_draw(ts->da);
-    }), &trig_state);
+    }), ts);
 
     g_signal_connect(motion, "leave", G_CALLBACK(+[](GtkEventControllerMotion*, gpointer user_data) {
         auto* ts = static_cast<AppState::TriggerState*>(user_data);
         ts->hovered = false;
         gtk_widget_queue_draw(ts->da);
-    }), &trig_state);
+    }), ts);
     gtk_widget_add_controller(da, motion);
 
-    // Left-click ONLY (`GDK_BUTTON_PRIMARY`) opens/toggles the drawer
+    // Left-click ONLY (`GDK_BUTTON_PRIMARY`) opens/toggles the drawer on this monitor
     GtkGesture* click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
-    g_signal_connect_swapped(click, "pressed", G_CALLBACK(+[](const char* e) {
-        toggle_popup(e);
-    }), (gpointer)(edge == "left" ? "left" : "right"));
+    g_signal_connect(click, "pressed", G_CALLBACK(+[](GtkGestureClick*, int, double, double, gpointer user_data) {
+        auto* ts = static_cast<AppState::TriggerState*>(user_data);
+        toggle_popup(ts->edge, ts->monitor);
+    }), ts);
     gtk_widget_add_controller(da, GTK_EVENT_CONTROLLER(click));
 
     return win;
+}
+
+static void sync_triggers(GApplication* app) {
+    GdkDisplay* display = gdk_display_get_default();
+    if (!display) return;
+    GListModel* monitors = gdk_display_get_monitors(display);
+    if (!monitors) return;
+
+    for (auto& mt : g_state.monitor_triggers) {
+        if (mt.left_win) gtk_window_destroy(GTK_WINDOW(mt.left_win));
+        if (mt.right_win) gtk_window_destroy(GTK_WINDOW(mt.right_win));
+    }
+    g_state.monitor_triggers.clear();
+
+    guint n = g_list_model_get_n_items(monitors);
+    for (guint i = 0; i < n; ++i) {
+        GdkMonitor* mon = GDK_MONITOR(g_list_model_get_item(monitors, i));
+        if (!mon) continue;
+
+        AppState::MonitorTriggers mt;
+        mt.monitor = mon;
+        mt.left_trig = std::make_unique<AppState::TriggerState>(AppState::TriggerState{"left", false, 90.0, 0, nullptr, mon});
+        mt.right_trig = std::make_unique<AppState::TriggerState>(AppState::TriggerState{"right", false, 90.0, 0, nullptr, mon});
+
+        mt.left_win = create_edge_trigger("left", mon, mt.left_trig.get());
+        mt.right_win = create_edge_trigger("right", mon, mt.right_trig.get());
+
+        gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(mt.left_win));
+        gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(mt.right_win));
+
+        gtk_widget_set_visible(mt.left_win, TRUE);
+        gtk_widget_set_visible(mt.right_win, TRUE);
+
+        g_state.monitor_triggers.push_back(std::move(mt));
+        g_object_unref(mon);
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1502,17 +1594,19 @@ static void on_activate(GApplication* app, gpointer) {
 
     g_state.notes_path = std::string(getenv("HOME") ? getenv("HOME") : "") + "/.config/monolith/scratchpad.txt";
 
-    g_state.left_trigger = create_edge_trigger("left");
-    g_state.right_trigger = create_edge_trigger("right");
-
-    gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(g_state.left_trigger));
-    gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(g_state.right_trigger));
-
-    gtk_widget_set_visible(g_state.left_trigger, TRUE);
-    gtk_widget_set_visible(g_state.right_trigger, TRUE);
-
     create_popup_window();
     gtk_application_add_window(GTK_APPLICATION(app), GTK_WINDOW(g_state.popup_win));
+
+    sync_triggers(app);
+    GdkDisplay* display = gdk_display_get_default();
+    if (display) {
+        GListModel* monitors = gdk_display_get_monitors(display);
+        if (monitors) {
+            g_signal_connect(monitors, "items-changed", G_CALLBACK(+[](GListModel*, guint, guint, guint, gpointer data) {
+                sync_triggers(G_APPLICATION(data));
+            }), app);
+        }
+    }
 }
 
 int main(int argc, char* argv[]) {
