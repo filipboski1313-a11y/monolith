@@ -897,19 +897,6 @@ static void hypr_socket_listener_thread() {
                 }
             }
 
-            // If a window was closed, re-warm any load_to_ram app after 1.8s
-            if (std::strstr(buf, "closewindow>>")) {
-                g_timeout_add(1800, +[](gpointer) -> gboolean {
-                    check_desktop_state();
-                    for (const auto& tmpl : g_graph.pinned_templates) {
-                        if (tmpl.load_to_ram) {
-                            exec_bg("monolith-ram-preloader warm \"" + tmpl.id + "\"");
-                        }
-                    }
-                    return G_SOURCE_REMOVE;
-                }, nullptr);
-            }
-
             // Filter relevant window/workspace events & coalesce rapid bursts
             if (std::strstr(buf, "workspace") || std::strstr(buf, "openwindow") ||
                 std::strstr(buf, "closewindow") || std::strstr(buf, "movewindow") ||

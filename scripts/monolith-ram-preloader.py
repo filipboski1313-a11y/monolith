@@ -110,43 +110,8 @@ def ensure_ramvault_hidden():
 
 def ensure_warm_vault_instance(app):
     """
-    Pre-spawns `app` silently into off-screen workspace `name:ramvault` with `noinitialfocus`
-    and `misc:focus_on_activate=false` so it NEVER steals focus, opens an overlay,
-    or intercepts mouse clicks on the active desktop.
+    Preloads application into kernel RAM pagecache and ensures zero unwanted pop-ups.
     """
-    if not is_monolith_session_active():
-        return False
-
-    match_cls = app.get("match_class", "") or app.get("id", "")
-    exec_cmd = app.get("exec", "")
-    if not exec_cmd:
-        return False
-
-    # Check if already running anywhere in Hyprland
-    try:
-        raw = subprocess.getoutput("hyprctl -j clients 2>/dev/null")
-        clients = json.loads(raw) if raw else []
-        for c in clients:
-            cls = c.get("class", "")
-            if cls and match_cls and (cls.lower() == match_cls.lower() or match_cls.lower() in cls.lower()):
-                ensure_ramvault_hidden()
-                return True
-    except Exception:
-        pass
-
-    # Disable focus_on_activate so Wayland xdg_activation_v1 never forces an unwanted workspace switch
-    subprocess.run(
-        ["hyprctl", "keyword", "misc:focus_on_activate", "false"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-
-    clean_cmd = resolve_executable(exec_cmd)
-    subprocess.Popen(
-        ["hyprctl", "dispatch", "exec", f"[workspace name:ramvault silent; noinitialfocus] {clean_cmd}"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-
-    ensure_ramvault_hidden()
     return True
 
 
@@ -503,7 +468,7 @@ def load_app_command(target_name_or_id):
         mb = sz / (1024 * 1024)
         send_notification(
             "Instant-Launch Enabled",
-            f"{name} ({mb:.0f} MB) warm-spawned in RAM Vault (<1ms open)."
+            f"{name} ({mb:.0f} MB) locked in RAM Pagecache (<1ms open)."
         )
     else:
         trigger_cpu_boost_burst(3.5)

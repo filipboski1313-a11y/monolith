@@ -39,42 +39,6 @@ if [ "$ACTIVE_WS" = "ramvault" ] || [ "$ACTIVE_WS" = "name:ramvault" ] || [ "$AC
     exit 0
 fi
 
-# Check if this window class has load_to_ram == true
-if [ -n "$ACTIVE_CLASS" ] && [ -f "$CFG" ]; then
-    IS_RAM_LOCKED=$(jq -r --arg cls "$ACTIVE_CLASS" '
-        .pinned[]? | select(.load_to_ram == true) |
-        select((.match_class | ascii_downcase) == ($cls | ascii_downcase) or
-               (($cls | ascii_downcase) | contains(.match_class | ascii_downcase))) |
-        .id
-    ' "$CFG" 2>/dev/null | head -n 1)
-
-    if [ -n "$IS_RAM_LOCKED" ]; then
-        # Check if there is already another instance in ramvault
-        ALREADY_IN_VAULT=$(hyprctl clients -j 2>/dev/null | jq --arg cls "$ACTIVE_CLASS" --arg addr "$ACTIVE_ADDR" '
-            [.[] | select((.workspace.name == "ramvault" or .workspace.name == "name:ramvault" or .workspace.name == "special:ramvault") and .address != $addr and ((.class | ascii_downcase) == ($cls | ascii_downcase)))] | length
-        ' 2>/dev/null || echo 0)
-
-        if [ "${ALREADY_IN_VAULT:-0}" -eq 0 ]; then
-            hyprctl dispatch movetoworkspacesilent "name:ramvault,address:$ACTIVE_ADDR" >/dev/null 2>&1
-        else
-            if [ -n "$ACTIVE_ADDR" ]; then
-                hyprctl dispatch closewindow "address:$ACTIVE_ADDR" >/dev/null 2>&1
-            else
-                hyprctl dispatch killactive >/dev/null 2>&1
-            fi
-        fi
-
-        # If we were inside special:extra and it is now empty, close special:extra
-        if [ "$ACTIVE_WS" = "special:extra" ]; then
-            REM_EXTRA=$(hyprctl clients -j 2>/dev/null | jq '[.[] | select(.workspace.name == "special:extra")] | length' 2>/dev/null || echo 0)
-            if [ "${REM_EXTRA:-0}" -eq 0 ]; then
-                hyprctl dispatch togglespecialworkspace extra >/dev/null 2>&1
-            fi
-        fi
-        exit 0
-    fi
-fi
-
 if [ -n "$ACTIVE_ADDR" ]; then
     hyprctl dispatch closewindow "address:$ACTIVE_ADDR" >/dev/null 2>&1
 else
