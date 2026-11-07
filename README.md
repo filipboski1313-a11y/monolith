@@ -106,7 +106,7 @@
 
 1. Clone repository to your config directory:
    ```bash
-   git clone https://github.com/USER/monolith-hyprland.git ~/.config/monolith
+   git clone https://github.com/filipboski1313-a11y/monolith.git ~/.config/monolith
    cd ~/.config/monolith
    ```
 
