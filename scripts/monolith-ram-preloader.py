@@ -132,21 +132,14 @@ def ensure_warm_vault_instance(app):
     except Exception:
         pass
 
-    # Set Hyprland windowrule dynamically so any child processes land directly in special:hidden
-    rule_cmd = f"workspace special:hidden silent, match:class (?i).*{match_cls}.*"
-    subprocess.run(
-        ["hyprctl", "keyword", "windowrule", rule_cmd],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-
     clean_cmd = resolve_executable(exec_cmd)
     subprocess.Popen(
-        ["hyprctl", "dispatch", "exec", f"[workspace special:hidden silent; noinitialfocus] {clean_cmd}"],
+        ["hyprctl", "dispatch", "exec", f"[workspace name:ramvault silent; noinitialfocus] {clean_cmd}"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
     # For Flatpaks or multi-process wrappers that fork outside initial exec rule,
-    # tuck the window into special:hidden as soon as its surface maps
+    # tuck the window into name:ramvault as soon as its surface maps
     def _tuck_window():
         for _ in range(50):
             time.sleep(0.08)
@@ -158,9 +151,9 @@ def ensure_warm_vault_instance(app):
                     addr = c.get("address", "")
                     ws = c.get("workspace", {}).get("name", "")
                     if addr and match_cls and (cls.lower() == match_cls.lower() or match_cls.lower() in cls.lower()):
-                        if ws != "special:hidden":
+                        if ws != "ramvault" and ws != "name:ramvault":
                             subprocess.run(
-                                ["hyprctl", "dispatch", "movetoworkspacesilent", f"special:hidden,address:{addr}"],
+                                ["hyprctl", "dispatch", "movetoworkspacesilent", f"name:ramvault,address:{addr}"],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                             )
                         return

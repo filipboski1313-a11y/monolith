@@ -59,8 +59,8 @@ if [ -n "$ACTIVE_CLASS" ] && [ -f "$CFG" ]; then
     ' "$CFG" 2>/dev/null | head -n 1)
 
     if [ -n "$IS_RAM_LOCKED" ]; then
-        # Stash to warm-standby special:hidden vault in <1ms
-        hyprctl dispatch movetoworkspacesilent "special:hidden,address:$ACTIVE_ADDR" >/dev/null 2>&1
+        # Stash to warm-standby name:ramvault in <1ms without slidevert animation
+        hyprctl dispatch movetoworkspacesilent "name:ramvault,address:$ACTIVE_ADDR" >/dev/null 2>&1
 
         # If we were inside special:extra and it is now empty, close special:extra
         if [ "$ACTIVE_WS" = "special:extra" ]; then

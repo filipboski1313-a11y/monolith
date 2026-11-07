@@ -664,6 +664,16 @@ static std::string format_ws_badge(int ws_id, const std::string& ws_name) {
     return "-";
 }
 
+static std::string g_hypr_focused_mon;
+
+static void sync_monitor_focus(OutputWindow* out) {
+    if (!out || out->name.empty()) return;
+    if (g_hypr_focused_mon != out->name) {
+        g_hypr_focused_mon = out->name;
+        HyprIPC::dispatch("focusmonitor " + out->name);
+    }
+}
+
 static void check_desktop_state() {
     g_graph.state_check_queued.store(false);
 
@@ -677,6 +687,9 @@ static void check_desktop_state() {
             if (mj.is_array()) {
                 for (const auto& mon : mj) {
                     std::string mname = mon.value("name", "");
+                    if (mon.value("focused", false)) {
+                        g_hypr_focused_mon = mname;
+                    }
                     int mws = mon.value("activeWorkspace", json::object()).value("id", 1);
                     std::string sp = mon.value("specialWorkspace", json::object()).value("name", "");
                     mon_active_ws[mname] = mws;
@@ -869,6 +882,16 @@ static void hypr_socket_listener_thread() {
             ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
             if (n <= 0) break;
             buf[n] = '\0';
+
+            // Track currently focused monitor across Hyprland
+            const char* fmon = std::strstr(buf, "focusedmon>>");
+            if (fmon) {
+                fmon += 12;
+                const char* comma = std::strchr(fmon, ',');
+                if (comma) {
+                    g_hypr_focused_mon = std::string(fmon, comma - fmon);
+                }
+            }
 
             // Hardware-speed guard: never allow special:ramvault to open as a visible overlay
             if (std::strstr(buf, "activespecial>>special:ramvault")) {
@@ -1655,6 +1678,7 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
+    sync_monitor_focus(out);
 
     out->dragged_node_idx = -1;
 
@@ -1858,6 +1882,7 @@ static void on_right_click(GtkGestureClick*, int, double x, double y, gpointer u
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
+    sync_monitor_focus(out);
 
     int idx = hit_test_node(out, x, y);
     if (idx >= 0) {
@@ -1904,6 +1929,7 @@ static void on_middle_click(GtkGestureClick*, int, double x, double y, gpointer 
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
+    sync_monitor_focus(out);
 
     int idx = hit_test_node(out, x, y);
     if (idx >= 0 && out->nodes[idx].is_running && !out->nodes[idx].hypr_address.empty()) {
@@ -1923,6 +1949,7 @@ static void on_motion(GtkEventControllerMotion*, double x, double y, gpointer us
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
+    sync_monitor_focus(out);
 
     if (out->menu_open) {
         double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
@@ -2060,6 +2087,9 @@ static void sync_output_windows(GApplication* app) {
                 gtk_widget_add_controller(out->da, GTK_EVENT_CONTROLLER(middle_click));
 
                 GtkEventController* motion = gtk_event_controller_motion_new();
+                g_signal_connect(motion, "enter", G_CALLBACK(+[](GtkEventControllerMotion*, double, double, gpointer user_data) {
+                    sync_monitor_focus(static_cast<OutputWindow*>(user_data));
+                }), out);
                 g_signal_connect(motion, "motion", G_CALLBACK(on_motion), out);
                 gtk_widget_add_controller(out->da, motion);
 
