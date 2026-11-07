@@ -32,11 +32,18 @@ if command -v git &>/dev/null && [ -d "${BASE_DIR}/.git" ]; then
 fi
 
 # Determine default repo from settings.json or git remote or fallback
-REPO="boski/monolith"
+REPO="filipboski1313-a11y/monolith"
 CHANNEL="releases"
+if [ -d "${BASE_DIR}/.git" ] && command -v git &>/dev/null; then
+    GIT_REMOTE=$(git -C "$BASE_DIR" remote get-url origin 2>/dev/null || true)
+    PARSED_REPO=$(echo "$GIT_REMOTE" | sed -E 's#^.*github.com[:/]([^/]+/[^/.]+)(\.git)?$#\1#')
+    if [ -n "$PARSED_REPO" ] && [ "$PARSED_REPO" != "$GIT_REMOTE" ]; then
+        REPO="$PARSED_REPO"
+    fi
+fi
 if [ -f "$SETTINGS_FILE" ] && command -v jq &>/dev/null; then
     SETTINGS_REPO=$(jq -r '.updates.repo // empty' "$SETTINGS_FILE" 2>/dev/null || true)
-    if [ -n "$SETTINGS_REPO" ]; then
+    if [ -n "$SETTINGS_REPO" ] && [ "$SETTINGS_REPO" != "boski/monolith" ]; then
         REPO="$SETTINGS_REPO"
     fi
     SETTINGS_CHAN=$(jq -r '.updates.channel // empty' "$SETTINGS_FILE" 2>/dev/null || true)

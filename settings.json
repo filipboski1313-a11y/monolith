@@ -119,7 +119,7 @@
     "auto_check_on_startup": true,
     "backup_before_update": true,
     "channel": "releases",
-    "repo": "boski/monolith"
+    "repo": "filipboski1313-a11y/monolith"
   },
   "waybar": {
     "active_ws_bg": "#18181b",
