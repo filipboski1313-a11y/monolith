@@ -18,7 +18,7 @@ SETTINGS_FILE="${BASE_DIR}/settings.json"
 VERSION_FILE="${BASE_DIR}/src/version.hpp"
 
 # Extract current version from version.hpp if present
-CURRENT_VERSION="1.2.0"
+CURRENT_VERSION="2.1.0"
 if [ -f "$VERSION_FILE" ]; then
     V_EXTRACT=$(grep -E '^#define MONOLITH_VERSION ' "$VERSION_FILE" | awk -F'"' '{print $2}')
     if [ -n "$V_EXTRACT" ]; then
