@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <pwd.h>
 #include <thread>
 #include <chrono>
 
@@ -24,6 +25,16 @@
 
 using json = nlohmann::json;
 using namespace Monolith;
+
+static inline std::string get_user_home() {
+    const char* home = std::getenv("HOME");
+    if (home && home[0] != '\0') return std::string(home);
+    struct passwd* pw = getpwuid(getuid());
+    if (pw && pw->pw_dir) return std::string(pw->pw_dir);
+    const char* user = std::getenv("USER");
+    if (user && user[0] != '\0') return "/home/" + std::string(user);
+    return "/tmp";
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MONOLITH TASK GRAPH 2.0 ("Constellation & Procedural Background Engine")
@@ -250,8 +261,7 @@ static void rebuild_background_surface() {
 }
 
 static void load_monolith_settings() {
-    const char* home = std::getenv("HOME");
-    std::string path = std::string(home ? home : "/home/boski") + "/.config/monolith/settings.json";
+    std::string path = get_user_home() + "/.config/monolith/settings.json";
     std::ifstream f(path);
     if (!f.is_open()) return;
 
@@ -325,8 +335,7 @@ static void load_monolith_settings() {
 static void check_desktop_state();
 
 static void save_config() {
-    const char* home = std::getenv("HOME");
-    std::string path = std::string(home ? home : "/home/boski") + "/.config/monolith/taskgraph/config.json";
+    std::string path = get_user_home() + "/.config/monolith/taskgraph/config.json";
     try {
         json j;
         j["pinned"] = json::array();
@@ -393,8 +402,7 @@ static void rebuild_default_constellation_edges() {
 }
 
 static void load_config(bool preserve_positions = false) {
-    const char* home = std::getenv("HOME");
-    std::string path = std::string(home ? home : "/home/boski") + "/.config/monolith/taskgraph/config.json";
+    std::string path = get_user_home() + "/.config/monolith/taskgraph/config.json";
     std::ifstream f(path);
     if (!f.is_open()) return;
 
@@ -484,8 +492,7 @@ static void load_config(bool preserve_positions = false) {
 }
 
 static void setup_file_monitors() {
-    const char* home = std::getenv("HOME");
-    std::string base = std::string(home ? home : "/home/boski") + "/.config/monolith";
+    std::string base = get_user_home() + "/.config/monolith";
 
     // 1. Monitor settings.json
     GFile* f_set = g_file_new_for_path((base + "/settings.json").c_str());

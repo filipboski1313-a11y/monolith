@@ -9,6 +9,8 @@
 #include <cmath>
 #include <iomanip>
 #include <algorithm>
+#include <unistd.h>
+#include <pwd.h>
 #include <nlohmann/json.hpp>
 #include "grain_generator.hpp"
 #include "hypr_ipc.hpp"
@@ -19,9 +21,11 @@ namespace Monolith {
 inline std::string get_home_dir() {
     const char* home = std::getenv("HOME");
     if (home && home[0] != '\0') return std::string(home);
+    struct passwd* pw = getpwuid(getuid());
+    if (pw && pw->pw_dir) return std::string(pw->pw_dir);
     const char* user = std::getenv("USER");
     if (user && user[0] != '\0') return "/home/" + std::string(user);
-    return "/home/boski";
+    return "/tmp";
 }
 
 inline std::string config_dir() {

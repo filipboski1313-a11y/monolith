@@ -26,7 +26,7 @@
       "name": "Firefox"
     },
     {
-      "exec": "foot -c /home/boski/.config/monolith/foot/foot.ini --app-id=btop-monitor -e btop",
+      "exec": "foot -c ~/.config/monolith/foot/foot.ini --app-id=btop-monitor -e btop",
       "icon": "btop",
       "id": "btop",
       "load_to_ram": false,
