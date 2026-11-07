@@ -264,34 +264,54 @@ static GdkPixbuf* get_icon_pixbuf(const std::string& icon_name, int size = 24) {
         g_graph.icon_theme = gtk_icon_theme_get_for_display(gdk_display_get_default());
     }
 
-    GdkPixbuf* pb = nullptr;
-    GtkIconPaintable* icon = gtk_icon_theme_lookup_icon(
-        g_graph.icon_theme,
-        icon_name.c_str(),
-        nullptr,
-        size,
-        1,
-        GTK_TEXT_DIR_NONE,
-        GTK_ICON_LOOKUP_FORCE_REGULAR
-    );
+    std::vector<std::string> candidates = { icon_name };
+    if (icon_name.find("foot") != std::string::npos) {
+        candidates.push_back("foot");
+        candidates.push_back("org.codeberg.dnkl.foot");
+        candidates.push_back("utilities-terminal");
+        candidates.push_back("terminal");
+    } else if (icon_name.find("alacritty") != std::string::npos) {
+        candidates.push_back("Alacritty");
+        candidates.push_back("utilities-terminal");
+    } else if (icon_name.find("kitty") != std::string::npos) {
+        candidates.push_back("kitty");
+        candidates.push_back("utilities-terminal");
+    } else if (icon_name.find("steam") != std::string::npos) {
+        candidates.push_back("steam");
+        candidates.push_back("com.valvesoftware.Steam");
+    }
 
-    if (icon) {
-        GFile* f = gtk_icon_paintable_get_file(icon);
-        if (f) {
-            char* path = g_file_get_path(f);
-            if (path) {
-                GError* err = nullptr;
-                pb = gdk_pixbuf_new_from_file_at_scale(path, size, size, TRUE, &err);
-                if (err) g_error_free(err);
-                g_free(path);
+    GdkPixbuf* pb = nullptr;
+    for (const auto& cand : candidates) {
+        GtkIconPaintable* icon = gtk_icon_theme_lookup_icon(
+            g_graph.icon_theme,
+            cand.c_str(),
+            nullptr,
+            size,
+            1,
+            GTK_TEXT_DIR_NONE,
+            GTK_ICON_LOOKUP_FORCE_REGULAR
+        );
+
+        if (icon) {
+            GFile* f = gtk_icon_paintable_get_file(icon);
+            if (f) {
+                char* path = g_file_get_path(f);
+                if (path) {
+                    GError* err = nullptr;
+                    pb = gdk_pixbuf_new_from_file_at_scale(path, size, size, TRUE, &err);
+                    if (err) g_error_free(err);
+                    g_free(path);
+                }
+                g_object_unref(f);
             }
-            g_object_unref(f);
+            g_object_unref(icon);
+            if (pb) break;
         }
-        g_object_unref(icon);
     }
 
     if (!pb) {
-        icon = gtk_icon_theme_lookup_icon(g_graph.icon_theme, "application-x-executable", nullptr, size, 1, GTK_TEXT_DIR_NONE, GTK_ICON_LOOKUP_FORCE_REGULAR);
+        GtkIconPaintable* icon = gtk_icon_theme_lookup_icon(g_graph.icon_theme, "application-x-executable", nullptr, size, 1, GTK_TEXT_DIR_NONE, GTK_ICON_LOOKUP_FORCE_REGULAR);
         if (icon) {
             GFile* f = gtk_icon_paintable_get_file(icon);
             if (f) {
@@ -348,6 +368,106 @@ static void rebuild_all_backgrounds() {
     }
 }
 
+enum AppCategory {
+    CAT_DEV_KNOWLEDGE = 0,
+    CAT_WEB_BROWSER,
+    CAT_COMMUNICATION,
+    CAT_MEDIA_CREATIVE,
+    CAT_SYSTEM_UTILS,
+    CAT_TRANSFER_STORAGE,
+    CAT_GAMING,
+    CAT_OTHER
+};
+
+static AppCategory classify_application(const std::string& id_or_cls) {
+    std::string s = id_or_cls;
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return std::tolower(c); });
+
+    if (s.find("obsidian") != std::string::npos ||
+        s.find("zed") != std::string::npos ||
+        s.find("code") != std::string::npos ||
+        s.find("nvim") != std::string::npos ||
+        s.find("vim") != std::string::npos ||
+        s.find("sublime") != std::string::npos ||
+        s.find("kate") != std::string::npos ||
+        s.find("emacs") != std::string::npos ||
+        s.find("git") != std::string::npos) {
+        return CAT_DEV_KNOWLEDGE;
+    }
+
+    if (s.find("zen") != std::string::npos ||
+        s.find("firefox") != std::string::npos ||
+        s.find("chrome") != std::string::npos ||
+        s.find("chromium") != std::string::npos ||
+        s.find("brave") != std::string::npos ||
+        s.find("edge") != std::string::npos ||
+        s.find("opera") != std::string::npos ||
+        s.find("vivaldi") != std::string::npos ||
+        s.find("tor") != std::string::npos) {
+        return CAT_WEB_BROWSER;
+    }
+
+    if (s.find("signal") != std::string::npos ||
+        s.find("telegram") != std::string::npos ||
+        s.find("vesktop") != std::string::npos ||
+        s.find("discord") != std::string::npos ||
+        s.find("caprine") != std::string::npos ||
+        s.find("messenger") != std::string::npos ||
+        s.find("whatsapp") != std::string::npos ||
+        s.find("slack") != std::string::npos ||
+        s.find("element") != std::string::npos ||
+        s.find("thunderbird") != std::string::npos) {
+        return CAT_COMMUNICATION;
+    }
+
+    if (s.find("spotify") != std::string::npos ||
+        s.find("vlc") != std::string::npos ||
+        s.find("obs") != std::string::npos ||
+        s.find("gimp") != std::string::npos ||
+        s.find("inkscape") != std::string::npos ||
+        s.find("blender") != std::string::npos ||
+        s.find("krita") != std::string::npos ||
+        s.find("mpv") != std::string::npos ||
+        s.find("audacity") != std::string::npos ||
+        s.find("kdenlive") != std::string::npos ||
+        s.find("darktable") != std::string::npos) {
+        return CAT_MEDIA_CREATIVE;
+    }
+
+    if (s.find("localsend") != std::string::npos ||
+        s.find("qbittorrent") != std::string::npos ||
+        s.find("torrent") != std::string::npos ||
+        s.find("thunar") != std::string::npos ||
+        s.find("dolphin") != std::string::npos ||
+        s.find("nautilus") != std::string::npos ||
+        s.find("pcmanfm") != std::string::npos ||
+        s.find("file") != std::string::npos) {
+        return CAT_TRANSFER_STORAGE;
+    }
+
+    if (s.find("btop") != std::string::npos ||
+        s.find("htop") != std::string::npos ||
+        s.find("foot") != std::string::npos ||
+        s.find("alacritty") != std::string::npos ||
+        s.find("kitty") != std::string::npos ||
+        s.find("term") != std::string::npos ||
+        s.find("settings") != std::string::npos ||
+        s.find("pavucontrol") != std::string::npos) {
+        return CAT_SYSTEM_UTILS;
+    }
+
+    if (s.find("steam") != std::string::npos ||
+        s.find("lutris") != std::string::npos ||
+        s.find("heroic") != std::string::npos ||
+        s.find("beamng") != std::string::npos ||
+        s.find("wine") != std::string::npos ||
+        s.find("game") != std::string::npos) {
+        return CAT_GAMING;
+    }
+
+    return CAT_OTHER;
+}
+
 static void rebuild_output_constellation_edges(OutputWindow* out) {
     if (!out) return;
 
@@ -368,7 +488,7 @@ static void rebuild_output_constellation_edges(OutputWindow* out) {
     out->edges = std::move(preserved_edges);
 
     auto add_edge = [&](const std::string& a, const std::string& b, double len) {
-        if (a == b) return;
+        if (a.empty() || b.empty() || a == b) return;
         bool has_a = false, has_b = false;
         for (const auto& n : out->nodes) {
             if (n.id == a) has_a = true;
@@ -388,56 +508,65 @@ static void rebuild_output_constellation_edges(OutputWindow* out) {
         return;
     }
 
-    // Dynamic Rule-Based Constellation:
-    // Gather all pinned nodes, find centroid, sort by polar angle theta around center
-    std::vector<size_t> pinned_indices;
-    double sum_x = 0.0, sum_y = 0.0;
-    for (size_t i = 0; i < out->nodes.size(); ++i) {
-        if (out->nodes[i].is_pinned) {
-            pinned_indices.push_back(i);
-            sum_x += out->nodes[i].x;
-            sum_y += out->nodes[i].y;
+    // Rule 1: Cluster Pinned Nodes by Domain / Category
+    std::unordered_map<int, std::vector<std::string>> cat_groups;
+    for (const auto& n : out->nodes) {
+        if (n.is_pinned) {
+            AppCategory cat = classify_application(n.id.empty() ? n.match_class : n.id);
+            cat_groups[cat].push_back(n.id);
         }
     }
 
-    size_t m = pinned_indices.size();
-    if (m < 2) return;
-
-    double cx = sum_x / static_cast<double>(m);
-    double cy = sum_y / static_cast<double>(m);
-
-    // Rule 1: Sort by polar angle theta = atan2(y - cy, x - cx)
-    std::sort(pinned_indices.begin(), pinned_indices.end(), [&](size_t a, size_t b) {
-        double ang_a = std::atan2(out->nodes[a].y - cy, out->nodes[a].x - cx);
-        double ang_b = std::atan2(out->nodes[b].y - cy, out->nodes[b].x - cx);
-        return ang_a < ang_b;
-    });
-
-    // Rule 2: Angular Perimeter Ring - connect adjacent angular neighbors (zero crossing lines)
-    for (size_t i = 0; i < m; ++i) {
-        const std::string& id_a = out->nodes[pinned_indices[i]].id;
-        const std::string& id_b = out->nodes[pinned_indices[(i + 1) % m]].id;
-        add_edge(id_a, id_b, 145.0 * out->scale);
-    }
-
-    // Rule 3: Triangulation Chords - connect every 2nd angular neighbor to form planar constellation triangles
-    if (m >= 5) {
-        for (size_t i = 0; i < m; ++i) {
-            if (m % 2 == 0 && (i % 2 != 0)) continue;
-            const std::string& id_a = out->nodes[pinned_indices[i]].id;
-            const std::string& id_b = out->nodes[pinned_indices[(i + 2) % m]].id;
-            add_edge(id_a, id_b, 260.0 * out->scale);
+    // Rule 2: Intra-Cluster Constellation Springs (Cohesive semantic groupings)
+    for (auto& [cat, ids] : cat_groups) {
+        size_t sz = ids.size();
+        if (sz == 2) {
+            add_edge(ids[0], ids[1], 155.0 * out->scale);
+        } else if (sz == 3) {
+            add_edge(ids[0], ids[1], 160.0 * out->scale);
+            add_edge(ids[1], ids[2], 160.0 * out->scale);
+            add_edge(ids[2], ids[0], 160.0 * out->scale);
+        } else if (sz >= 4) {
+            for (size_t i = 0; i < sz; ++i) {
+                add_edge(ids[i], ids[(i + 1) % sz], 150.0 * out->scale);
+            }
+            for (size_t i = 0; i < sz; i += 2) {
+                add_edge(ids[i], ids[(i + 2) % sz], 220.0 * out->scale);
+            }
         }
     }
+
+    // Rule 3: Inter-Cluster Semantic Bridges (Harmonic network connectivity)
+    auto link_clusters = [&](int cat1, int cat2, double len) {
+        if (cat_groups.count(cat1) && !cat_groups[cat1].empty() &&
+            cat_groups.count(cat2) && !cat_groups[cat2].empty()) {
+            add_edge(cat_groups[cat1][0], cat_groups[cat2][0], len * out->scale);
+        }
+    };
+
+    link_clusters(CAT_DEV_KNOWLEDGE, CAT_WEB_BROWSER, 230.0);
+    link_clusters(CAT_DEV_KNOWLEDGE, CAT_SYSTEM_UTILS, 240.0);
+    link_clusters(CAT_WEB_BROWSER, CAT_COMMUNICATION, 240.0);
+    link_clusters(CAT_COMMUNICATION, CAT_TRANSFER_STORAGE, 230.0);
+    link_clusters(CAT_TRANSFER_STORAGE, CAT_MEDIA_CREATIVE, 240.0);
+    link_clusters(CAT_MEDIA_CREATIVE, CAT_DEV_KNOWLEDGE, 250.0);
+    link_clusters(CAT_SYSTEM_UTILS, CAT_TRANSFER_STORAGE, 250.0);
+    link_clusters(CAT_MEDIA_CREATIVE, CAT_SYSTEM_UTILS, 260.0);
+    link_clusters(CAT_GAMING, CAT_MEDIA_CREATIVE, 200.0);
+    link_clusters(CAT_GAMING, CAT_SYSTEM_UTILS, 220.0);
 }
 
 static void init_output_nodes(OutputWindow* out, bool preserve_positions = false) {
     if (!out) return;
 
     std::unordered_map<std::string, std::pair<double, double>> old_pos;
+    std::vector<AppNode> old_unpinned;
     if (preserve_positions) {
         for (const auto& n : out->nodes) {
             old_pos[n.id] = {n.x, n.y};
+            if (!n.is_pinned) {
+                old_unpinned.push_back(n);
+            }
         }
     }
 
@@ -474,9 +603,23 @@ static void init_output_nodes(OutputWindow* out, bool preserve_positions = false
             n.x = old_pos[n.id].first;
             n.y = old_pos[n.id].second;
         } else {
-            double angle = (2.0 * M_PI * i) / count - (M_PI / 2.0);
-            n.x = cx + rx * std::cos(angle);
-            n.y = cy + ry * std::sin(angle);
+            AppCategory cat = classify_application(n.id.empty() ? n.match_class : n.id);
+            double base_ang = 0.0;
+            switch (cat) {
+                case CAT_DEV_KNOWLEDGE:   base_ang = 215.0 * M_PI / 180.0; break;
+                case CAT_WEB_BROWSER:     base_ang = 270.0 * M_PI / 180.0; break;
+                case CAT_SYSTEM_UTILS:    base_ang = 325.0 * M_PI / 180.0; break;
+                case CAT_COMMUNICATION:   base_ang = 20.0  * M_PI / 180.0; break;
+                case CAT_TRANSFER_STORAGE:base_ang = 75.0  * M_PI / 180.0; break;
+                case CAT_MEDIA_CREATIVE:  base_ang = 140.0 * M_PI / 180.0; break;
+                case CAT_GAMING:          base_ang = 175.0 * M_PI / 180.0; break;
+                default:                  base_ang = (2.0 * M_PI * i) / std::max(size_t(1), count); break;
+            }
+            double jitter_ang = ((i % 5) - 2) * 0.12;
+            double jitter_rad = 0.82 + (i % 3) * 0.15;
+            double ang = base_ang + jitter_ang;
+            n.x = cx + rx * jitter_rad * std::cos(ang);
+            n.y = cy + ry * jitter_rad * std::sin(ang);
         }
 
         n.drift_phase = i * 1.17;
@@ -484,6 +627,14 @@ static void init_output_nodes(OutputWindow* out, bool preserve_positions = false
         n.pixbuf = get_icon_pixbuf(n.icon_name, 22);
 
         out->nodes.push_back(n);
+    }
+
+    for (auto& dn : old_unpinned) {
+        if (preserve_positions && old_pos.find(dn.id) != old_pos.end()) {
+            dn.x = old_pos[dn.id].first;
+            dn.y = old_pos[dn.id].second;
+        }
+        out->nodes.push_back(dn);
     }
 
     rebuild_output_constellation_edges(out);
@@ -908,25 +1059,35 @@ static void check_desktop_state() {
                 dn.drift_phase = (rand() % 628) / 100.0;
                 dn.drift_speed = 0.22;
 
-                // Find anchor: prefer node sharing the same workspace, else nearest Euclidean node
+                // Find anchor:
+                // 1. Prefer node in the same semantic category
+                AppCategory dn_cat = classify_application(cls.empty() ? title : cls);
                 int connect_to_idx = -1;
                 for (size_t i = 0; i < out->nodes.size(); ++i) {
-                    if (out->nodes[i].workspace_id == cws && !out->nodes[i].hypr_address.empty()) {
+                    if (out->nodes[i].is_pinned && classify_application(out->nodes[i].id.empty() ? out->nodes[i].match_class : out->nodes[i].id) == dn_cat) {
                         connect_to_idx = static_cast<int>(i);
                         break;
                     }
+                }
+                // 2. Fallback: node sharing the same workspace
+                if (connect_to_idx < 0) {
+                    for (size_t i = 0; i < out->nodes.size(); ++i) {
+                        if (out->nodes[i].workspace_id == cws && !out->nodes[i].hypr_address.empty()) {
+                            connect_to_idx = static_cast<int>(i);
+                            break;
+                        }
+                    }
+                }
+                // 3. Fallback: nearest node
+                if (connect_to_idx < 0 && !out->nodes.empty()) {
+                    connect_to_idx = 0;
                 }
 
                 if (connect_to_idx >= 0) {
                     const auto& parent = out->nodes[connect_to_idx];
                     double ang = (rand() % 360) * M_PI / 180.0;
-                    dn.x = std::clamp(parent.x + 180.0 * out->scale * std::cos(ang), 100.0 * out->scale, out->width - 100.0 * out->scale);
-                    dn.y = std::clamp(parent.y + 180.0 * out->scale * std::sin(ang), 100.0 * out->scale, out->height - 100.0 * out->scale);
-                } else if (!out->nodes.empty()) {
-                    const auto& ref = out->nodes[rand() % out->nodes.size()];
-                    double ang = (rand() % 360) * M_PI / 180.0;
-                    dn.x = std::clamp(ref.x + 210.0 * out->scale * std::cos(ang), 100.0 * out->scale, out->width - 100.0 * out->scale);
-                    dn.y = std::clamp(ref.y + 210.0 * out->scale * std::sin(ang), 100.0 * out->scale, out->height - 100.0 * out->scale);
+                    dn.x = std::clamp(parent.x + 155.0 * out->scale * std::cos(ang), 90.0 * out->scale, out->width - 90.0 * out->scale);
+                    dn.y = std::clamp(parent.y + 155.0 * out->scale * std::sin(ang), 90.0 * out->scale, out->height - 90.0 * out->scale);
                 } else {
                     dn.x = out->width * 0.5;
                     dn.y = out->height * 0.5;
@@ -935,20 +1096,8 @@ static void check_desktop_state() {
                 dn.pixbuf = get_icon_pixbuf(dn.icon_name, 22);
                 out->nodes.push_back(dn);
 
-                // Attach edge to anchor or nearest node
-                if (connect_to_idx < 0 && out->nodes.size() > 1) {
-                    double min_dist = 1e9;
-                    for (size_t i = 0; i < out->nodes.size() - 1; ++i) {
-                        double d = std::hypot(dn.x - out->nodes[i].x, dn.y - out->nodes[i].y);
-                        if (d < min_dist) {
-                            min_dist = d;
-                            connect_to_idx = static_cast<int>(i);
-                        }
-                    }
-                }
-
                 if (connect_to_idx >= 0 && connect_to_idx < static_cast<int>(out->nodes.size() - 1)) {
-                    out->edges.push_back({dn.id, out->nodes[connect_to_idx].id, 240.0 * out->scale});
+                    out->edges.push_back({dn.id, out->nodes[connect_to_idx].id, 175.0 * out->scale});
                 }
 
                 topo_changed = true;
@@ -981,6 +1130,7 @@ static void check_desktop_state() {
             } else if (!out->is_covered && out->da) {
                 gtk_widget_queue_draw(out->da);
             }
+            std::cout << "[TASKGRAPH] " << out->name << " nodes=" << out->nodes.size() << " edges=" << out->edges.size() << " covered=" << out->is_covered << std::endl;
         }
     } catch (...) {}
 }
@@ -1126,7 +1276,7 @@ static void update_physics_for_output(OutputWindow* out) {
         g_popup_rep.smooth_weight *= 0.84;
     }
 
-    if (out->is_covered && !out->fuzzel_active && g_popup_rep.smooth_weight < 0.01 && out->return_timer <= 0.0) {
+    if (out->is_covered && !out->fuzzel_active && g_popup_rep.smooth_weight < 0.01 && out->return_timer <= 0.0 && out->dragged_node_idx < 0) {
         return;
     }
 
@@ -1363,6 +1513,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         out->height = height;
         rebuild_output_bg(out);
         init_output_nodes(out, true);
+        check_desktop_state();
     }
 
     // ──────────────── 0. UNIFIED PROCEDURAL GRADIENT + GRAIN BASE ────────────
@@ -1956,12 +2107,15 @@ static void on_drag_update(GtkGestureDrag*, double offset_x, double offset_y, gp
         auto& node = out->nodes[out->dragged_node_idx];
         node.x = out->drag_start_x + offset_x;
         node.y = out->drag_start_y + offset_y;
+        node.vx = 0.0;
+        node.vy = 0.0;
         out->drag_dist = std::hypot(offset_x, offset_y);
-        wake_output_physics(out, 0.45);
+        wake_output_physics(out, 0.75);
+        if (out->da) gtk_widget_queue_draw(out->da);
     }
 }
 
-static void on_drag_end(GtkGestureDrag*, double, double, gpointer user_data) {
+static void on_drag_end(GtkGestureDrag*, double offset_x, double offset_y, gpointer user_data) {
     OutputWindow* out = static_cast<OutputWindow*>(user_data);
     if (!out) return;
 
@@ -1969,13 +2123,17 @@ static void on_drag_end(GtkGestureDrag*, double, double, gpointer user_data) {
         auto& node = out->nodes[out->dragged_node_idx];
         node.is_dragged = false;
 
-        if (out->drag_dist < 15.0) {
+        if (out->drag_dist < 12.0) {
             focus_or_launch_node(out, node);
+        } else {
+            node.vx = std::clamp(offset_x * 0.03, -2.5, 2.5);
+            node.vy = std::clamp(offset_y * 0.03, -2.5, 2.5);
+            wake_output_physics(out, 0.85);
         }
     }
 
     out->dragged_node_idx = -1;
-    wake_output_physics(out, 0.5);
+    if (out->da) gtk_widget_queue_draw(out->da);
 }
 
 static void on_right_click(GtkGestureClick*, int, double x, double y, gpointer user_data) {
@@ -2274,6 +2432,10 @@ static void on_activate(GApplication* app, gpointer) {
     }
 
     ensure_physics_timer_running();
+    g_timeout_add(1500, +[](gpointer) -> gboolean {
+        check_desktop_state();
+        return G_SOURCE_CONTINUE;
+    }, nullptr);
     for (const auto& tmpl : g_graph.pinned_templates) {
         if (tmpl.load_to_ram) {
             exec_bg("monolith-ram-preloader warm \"" + tmpl.id + "\"");
