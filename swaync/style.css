@@ -27,21 +27,21 @@ blankwindow,
 
 .notification-row .notification-background .notification {
   background: #000000;
-  border: 1px solid #222222;
-  border-radius: 4px;
+  border: 1px solid #27272a;
+  border-radius: 8px;
   padding: 10px 14px;
   color: #f4f4f5;
-  box-shadow: none;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.92);
   transition: all 0.12s ease-out;
 }
 
 .notification-row .notification-background .notification:hover {
-  border-color: #3a3a3a;
-  background: #050505;
+  border-color: #3f3f46;
+  background: #07070a;
 }
 
 .notification-row .notification-background .notification.critical {
-  border-left: 2px solid #ef4444;
+  border-left: 3px solid #ef4444;
 }
 
 .notification-row .notification-background .notification.low {

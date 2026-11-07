@@ -1,7 +1,7 @@
 * {
     border: none;
-    border-radius: 0;
-    font-family: "JetBrains Mono", monospace;
+    border-radius: 6px;
+    font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", monospace;
     font-weight: 600;
     font-size: 12px;
     min-height: 0;
@@ -13,66 +13,114 @@ window#waybar {
     border-bottom: 1px solid #141414;
 }
 
+#custom-menu {
+    background: #09090c;
+    border: 1px solid #1d1d22;
+    border-radius: 7px;
+    padding: 1px 10px;
+    margin: 3px 4px 3px 6px;
+    font-size: 14px;
+    color: #ffffff;
+    transition: all 120ms ease;
+}
+#custom-menu:hover {
+    background: #18181b;
+    border-color: #3f3f46;
+    color: #ffffff;
+}
+
+#workspaces {
+    background: #09090c;
+    border: 1px solid #18181d;
+    border-radius: 7px;
+    padding: 1px 3px;
+    margin: 3px 4px;
+}
+
 #workspaces button {
-    padding: 0 6px;
+    padding: 1px 8px;
     background: transparent;
     color: #52525b;
-    border-radius: 2px;
-    margin: 2px 1px;
+    border-radius: 5px;
+    margin: 1px 1px;
+    transition: all 120ms ease;
+}
+#workspaces button:hover {
+    background: #141418;
+    color: #e4e4e7;
+    border-radius: 5px;
 }
 #workspaces button.active {
     background: #18181b;
     color: #ffffff;
+    border-radius: 5px;
 }
 
 #custom-spatial_tab {
-    padding: 0 8px;
-    margin: 3px 6px;
+    padding: 1px 9px;
+    margin: 3px 4px;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.5px;
-    border-radius: 2px;
-    background: #0a0a0a;
-    border: 1px solid #27272a;
+    border-radius: 7px;
+    background: #09090c;
+    border: 1px solid #1e1e24;
     color: #a1a1aa;
+    transition: all 120ms ease;
+}
+#custom-spatial_tab:hover {
+    border-color: #3f3f46;
+    color: #ffffff;
 }
 #custom-spatial_tab.tab-spotify {
-    background: #0f2415;
+    background: #07190e;
     border-color: #1db954;
-    color: #1ed760;
+    color: #4ade80;
 }
 #custom-spatial_tab.tab-extra {
-    background: #231808;
+    background: #1c1205;
     border-color: #d97706;
-    color: #f59e0b;
+    color: #fbbf24;
 }
 #custom-spatial_tab.tab-desktop {
-    background: #0f0f10;
+    background: #09090c;
     color: #d4d4d8;
 }
 
 #window {
     color: #71717a;
     font-weight: 500;
+    padding: 0 6px;
 }
 
 #clock {
-    color: #e4e4e7;
+    color: #ffffff;
     font-weight: 700;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.6px;
+    background: #09090c;
+    border: 1px solid #1a1a20;
+    border-radius: 7px;
+    padding: 1px 13px;
+    margin: 3px 0;
+    transition: all 120ms ease;
+}
+#clock:hover {
+    background: #141418;
+    border-color: #27272e;
 }
 
 #custom-drawer_toggle {
-    padding: 0 7px;
+    padding: 1px 8px;
     margin: 3px 2px;
     color: #e4e4e7;
     background: #111111;
     border: 1px solid #222222;
-    border-radius: 2px;
+    border-radius: 6px;
+    transition: all 120ms ease;
 }
 #custom-drawer_toggle:hover {
-    background: #1f1f23;
-    border-color: #52525b;
+    background: #18181c;
+    border-color: #3f3f46;
     color: #ffffff;
 }
 
@@ -88,10 +136,13 @@ window#waybar {
 #custom-settings,
 #custom-notification,
 #custom-power {
-    padding: 0 6px;
-    margin: 2px 1px;
+    padding: 1px 8px;
+    margin: 3px 1px;
     color: #e4e4e7;
-    border-radius: 2px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    transition: all 120ms ease;
 }
 
 #idle_inhibitor:hover,
@@ -104,16 +155,50 @@ window#waybar {
 #memory:hover,
 #custom-nightlight:hover,
 #custom-settings:hover,
-#custom-notification:hover,
-#custom-power:hover {
-    background: #18181b;
+#custom-notification:hover {
+    background: #141418;
+    border-color: #27272e;
     color: #ffffff;
 }
 
+#idle_inhibitor.activated {
+    color: #38bdf8;
+    background: #071722;
+    border-color: #0369a1;
+}
+#pulseaudio.muted {
+    color: #52525b;
+}
+#network.disconnected {
+    color: #52525b;
+}
+#battery.charging, #battery.plugged {
+    color: #4ade80;
+}
+#battery.warning:not(.charging) {
+    color: #fbbf24;
+}
+#battery.critical:not(.charging) {
+    color: #f87171;
+    background: #220808;
+    border-color: #7f1d1d;
+}
+
+#custom-power {
+    margin-right: 6px;
+}
+#custom-power:hover {
+    background: #250909;
+    border-color: #7f1d1d;
+    color: #f87171;
+}
+
 tooltip {
-    background: #000000;
-    border: 1px solid #27272a;
-    border-radius: 4px;
+    background: #050507;
+    border: 1px solid #27272e;
+    border-radius: 8px;
+    padding: 3px 5px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.85);
 }
 tooltip label {
     font-family: "JetBrains Mono", monospace;
@@ -122,6 +207,7 @@ tooltip label {
     padding: 3px 6px;
 }
 .drawer-child {
-    padding: 0 5px;
+    padding: 1px 6px;
     margin: 2px 1px;
+    border-radius: 5px;
 }

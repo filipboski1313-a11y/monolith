@@ -2,10 +2,10 @@
   "physics": {
     "center_gravity": 0.01,
     "damping": 0.9019230769230768,
-    "fuzzel_repulsion": 36.0,
-    "repulsion": 16000.0,
+    "fuzzel_repulsion": 26.0,
+    "repulsion": 24000.0,
     "repulsion_radius": 620.0,
-    "rest_length": 223.2051282051282,
+    "rest_length": 260.0,
     "spring_k": 0.004321794871794872
   },
   "pinned": [

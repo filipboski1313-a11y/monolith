@@ -10,7 +10,7 @@ LDFLAGS = -flto -s $(shell pkg-config --libs libadwaita-1 gtk4 cairo)
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) settings.hpp bezier_widget.hpp grain_generator.hpp
+$(TARGET): $(SRC) settings.hpp bezier_widget.hpp grain_generator.hpp version.hpp
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(SRC) -o $(TARGET) $(LDFLAGS)
 	@echo "Build complete: $(TARGET)"

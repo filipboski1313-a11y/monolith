@@ -20,3 +20,6 @@ __pycache__/
 
 # User private scratchpad
 scratchpad.txt
+
+# Backup snapshots
+backups/

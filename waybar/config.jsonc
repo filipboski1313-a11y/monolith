@@ -6,6 +6,7 @@
       "󰃟",
       "󰃠"
     ],
+    "on-click": "monolith-popup backlight",
     "scroll-step": 2
   },
   "battery": {
@@ -25,6 +26,7 @@
     ],
     "format-plugged": "󰂄 {capacity}%",
     "interval": 10,
+    "on-click": "monolith-popup battery",
     "states": {
       "critical": 10,
       "warning": 20
@@ -52,13 +54,12 @@
     "on-click": "monolith-popup system"
   },
   "custom/drawer_toggle": {
-    "format": "󰐃",
-    "on-click": "/home/boski/.config/monolith/scripts/drawer-toggle.sh",
-    "tooltip": "System Drawer [Pinned] (Click to collapse)"
+    "format": "󰍜",
+    "tooltip": "System Modules Drawer (Click to toggle)"
   },
   "custom/menu": {
     "format": "󰣇",
-    "on-click": "pkill fuzzel || fuzzel --config ~/.config/monolith/fuzzel/fuzzel.ini",
+    "on-click": "~/.config/monolith/scripts/app-launcher.sh",
     "tooltip": "Application Menu (SUPER)"
   },
   "custom/nightlight": {
@@ -87,14 +88,16 @@
     "interval": 2,
     "on-click": "~/.config/monolith/scripts/spatial-tab.sh up",
     "on-click-right": "~/.config/monolith/scripts/spatial-tab.sh down",
+    "on-scroll-down": "~/.config/monolith/scripts/spatial-tab.sh down",
+    "on-scroll-up": "~/.config/monolith/scripts/spatial-tab.sh up",
     "return-type": "json",
     "signal": 8
   },
   "group/drawer": {
     "drawer": {
       "children-class": "drawer-child",
-      "click-to-reveal": false,
-      "transition-duration": 200,
+      "click-to-reveal": true,
+      "transition-duration": 250,
       "transition-left-to-right": false
     },
     "modules": [
@@ -155,12 +158,12 @@
     "clock"
   ],
   "modules-left": [
+    "custom/menu",
     "hyprland/workspaces",
     "custom/spatial_tab",
     "hyprland/window"
   ],
   "modules-right": [
-    "custom/drawer_toggle",
     "idle_inhibitor",
     "bluetooth",
     "network",

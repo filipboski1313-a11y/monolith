@@ -1,7 +1,6 @@
 [Unit]
 Description=Monolith RAM Preloader (Instant App Launch from Memory)
-PartOf=graphical-session.target
-After=graphical-session.target
+After=network.target
 
 [Service]
 Type=oneshot
@@ -9,4 +8,4 @@ ExecStart=/usr/local/bin/monolith-ram-preloader preload-all
 RemainAfterExit=yes
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=default.target graphical-session.target

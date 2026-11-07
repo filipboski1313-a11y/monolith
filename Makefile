@@ -21,6 +21,7 @@ install: all
 		$(MAKE) -C $$dir PREFIX=$(PREFIX) DESTDIR=$(DESTDIR) install || exit 1; \
 	done
 	install -Dm755 scripts/monolith-ram-preloader.py $(DESTDIR)$(PREFIX)/bin/monolith-ram-preloader
+	install -Dm755 scripts/monolith-updater.sh $(DESTDIR)$(PREFIX)/bin/monolith-updater
 	@echo "Monolith installation complete to $(DESTDIR)$(PREFIX)/bin"
 
 .PHONY: all clean install $(SUBDIRS)

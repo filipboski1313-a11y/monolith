@@ -62,9 +62,12 @@ echo -e "${BLUE}[3/5] Compiling native C++ suite (Settings, TaskGraph, Toolbox, 
 make -C "${SCRIPT_DIR}" clean
 make -C "${SCRIPT_DIR}" -j"$(nproc)"
 
-# 4. Install Binaries to /usr/local/bin
-echo -e "${BLUE}[4/5] Installing binaries to /usr/local/bin...${NC}"
+# 4. Install Binaries to /usr/local/bin and ~/.local/bin
+echo -e "${BLUE}[4/5] Installing binaries to /usr/local/bin and ~/.local/bin...${NC}"
 sudo make -C "${SCRIPT_DIR}" install
+mkdir -p "${HOME}/.local/bin"
+cp -f "${SCRIPT_DIR}/bin/"* "${HOME}/.local/bin/" 2>/dev/null || true
+cp -f "${SCRIPT_DIR}/scripts/monolith-updater.sh" "${HOME}/.local/bin/monolith-updater" 2>/dev/null || true
 
 # 5. Setup Systemd User Units
 echo -e "${BLUE}[5/5] Configuring systemd --user service units...${NC}"

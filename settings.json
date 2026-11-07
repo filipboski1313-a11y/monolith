@@ -2,24 +2,28 @@
   "animations": {
     "enabled": true,
     "fade": 1.2,
-    "p1x": 0.05,
-    "p1y": 0.9,
-    "p2x": 0.1836734693877551,
-    "p2y": 1.0,
+    "p1x": 1.0,
+    "p1y": 0.0,
+    "p2x": 0.0,
+    "p2y": 0.9615384615384617,
     "preset": "Micro Snappy",
     "window_style": "popin 90%",
     "windows_in": 1.4,
     "windows_move": 1.4,
     "windows_out": 1.2,
     "workspace_style": "slide",
-    "workspaces": 1.4
+    "workspaces": 2.3621794871794872
   },
   "display": {
     "nightlight_enabled": false,
     "nightlight_temp": 4200
   },
   "display_settings": {
+    "allow_tearing": false,
+    "battery_limit_80": false,
     "cursor_size": 24,
+    "direct_scanout": true,
+    "idle_timeout_min": 10,
     "mode": "1920x1200@60.00Hz",
     "monitor_name": "eDP-1",
     "scale": 1.2788461538461537,
@@ -42,37 +46,57 @@
   "geometry": {
     "active_border_1": "#ffffff",
     "active_border_2": "#333333",
-    "border_angle": 45,
+    "border_angle": 108,
     "border_size": 1,
     "gaps_in": 0,
     "gaps_out": 0,
     "inactive_border": "#141414",
-    "rounding": 4
+    "rounding": 4,
+    "smart_gaps": false
   },
   "grain": {
-    "algorithm": "gaussian",
+    "algorithm": "dither",
     "color1": "#000000",
-    "color2": "#18181b",
-    "color3": "#27272a",
+    "color2": "#0ac5d4",
+    "color3": "#3b82f6",
     "crosshair": false,
-    "gradient_type": "none",
-    "intensity": 17.05128205128205,
+    "gradient_type": "mesh_3point",
+    "intensity": 25.897435897435898,
     "preset": "OLED Monolith",
-    "scale": 2,
+    "scale": 1,
     "tint": "#d4d4d8"
   },
   "input": {
+    "accel_profile": "adaptive",
     "disable_while_typing": true,
+    "follow_mouse": 1,
+    "left_handed": false,
+    "middle_click_paste": true,
     "natural_scroll": true,
+    "repeat_delay": 250,
+    "repeat_rate": 45,
     "scroll_factor": 1.0,
     "sensitivity": 0.0,
     "tap_to_click": true
   },
+  "monitors": [
+    {
+      "description": "BOE 0x0A6A",
+      "enabled": true,
+      "mode": "preferred",
+      "name": "eDP-1",
+      "position": "0x0",
+      "scale": 1.2283653846153846,
+      "vrr": 0
+    }
+  ],
   "opacity": {
     "active_opacity": 1.0,
     "blur_enabled": false,
     "blur_passes": 2,
     "blur_size": 7,
+    "dim_inactive": false,
+    "dim_strength": 0.2,
     "fullscreen_opacity": 1.0,
     "inactive_opacity": 1.0,
     "shadow_enabled": true,
@@ -86,10 +110,16 @@
     "edge_alpha": 0.45,
     "edge_width": 1.0,
     "node_radius": 16.0,
-    "repulsion": 16000.0,
+    "repulsion": 24000.0,
     "repulsion_radius": 620.0,
-    "rest_length": 223.2051282051282,
+    "rest_length": 260.0,
     "spring_k": 0.004321794871794872
+  },
+  "updates": {
+    "auto_check_on_startup": true,
+    "backup_before_update": true,
+    "channel": "releases",
+    "repo": "boski/monolith"
   },
   "waybar": {
     "active_ws_bg": "#18181b",

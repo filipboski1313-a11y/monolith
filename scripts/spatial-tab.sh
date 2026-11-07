@@ -2,9 +2,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Monolith Spatial Tab Controller
 # Enforces strictly 1-step vertical transitions between Spotify / Desktop / Extra
-# Direction-aware animations:
-#   - Spotify: slidevert 100%
-#   - Extra: slidevert -100%
+# Prevents opening `special:extra` when empty (eliminating the invisible overlay trap)
 # ══════════════════════════════════════════════════════════════════════════════
 
 ACTION="$1"
@@ -26,59 +24,66 @@ if [ "$CUR_SPECIAL" = "null" ]; then
     CUR_SPECIAL=""
 fi
 
+# Always close ramvault if it ever got opened
+if [ "$CUR_SPECIAL" = "special:ramvault" ]; then
+    hyprctl dispatch togglespecialworkspace ramvault >/dev/null 2>&1
+    CUR_SPECIAL=""
+fi
+
+EXTRA_COUNT=$(hyprctl clients -j 2>/dev/null | jq '[.[] | select(.workspace.name == "special:extra")] | length' 2>/dev/null || echo 0)
+
 case "$ACTION" in
     up)
         if [ "$CUR_SPECIAL" = "special:extra" ]; then
-            hyprctl keyword animation "specialWorkspace, 1, 1.4, micro, slidevert -100%" >/dev/null 2>&1
-            hyprctl dispatch togglespecialworkspace extra
+            hyprctl --batch "keyword animation specialWorkspace, 1, 1.4, micro, slidevert -100% ; dispatch togglespecialworkspace extra" >/dev/null 2>&1
         elif [ -z "$CUR_SPECIAL" ]; then
-            hyprctl keyword animation "specialWorkspace, 1, 1.4, micro, slidevert 100%" >/dev/null 2>&1
             if ! pgrep -x spotify >/dev/null 2>&1 && ! pgrep -f "spotify-launcher" >/dev/null 2>&1; then
                 spotify >/dev/null 2>&1 &
-                sleep 0.3
+                sleep 0.25
             fi
-            hyprctl dispatch togglespecialworkspace spotify
+            hyprctl --batch "keyword animation specialWorkspace, 1, 1.4, micro, slidevert 100% ; dispatch togglespecialworkspace spotify" >/dev/null 2>&1
         fi
         ;;
 
     down)
         if [ "$CUR_SPECIAL" = "special:spotify" ]; then
-            hyprctl keyword animation "specialWorkspace, 1, 1.4, micro, slidevert 100%" >/dev/null 2>&1
-            hyprctl dispatch togglespecialworkspace spotify
+            hyprctl --batch "keyword animation specialWorkspace, 1, 1.4, micro, slidevert 100% ; dispatch togglespecialworkspace spotify" >/dev/null 2>&1
         elif [ -z "$CUR_SPECIAL" ]; then
-            hyprctl keyword animation "specialWorkspace, 1, 1.4, micro, slidevert -100%" >/dev/null 2>&1
-            hyprctl dispatch togglespecialworkspace extra
+            if [ "${EXTRA_COUNT:-0}" -gt 0 ]; then
+                hyprctl --batch "keyword animation specialWorkspace, 1, 1.4, micro, slidevert -100% ; dispatch togglespecialworkspace extra" >/dev/null 2>&1
+            else
+                notify-send -a Monolith -i emblem-shared -t 1500 "Extra Shelf is Empty" "Stash window: SUPER + Alt + S or SUPER + scroll up"
+            fi
         fi
         ;;
 
     toggle_spotify)
-        hyprctl keyword animation "specialWorkspace, 1, 1.4, micro, slidevert 100%" >/dev/null 2>&1
         if [ "$CUR_SPECIAL" = "special:spotify" ]; then
-            hyprctl dispatch togglespecialworkspace spotify
+            hyprctl --batch "keyword animation specialWorkspace, 1, 1.4, micro, slidevert 100% ; dispatch togglespecialworkspace spotify" >/dev/null 2>&1
         else
             if [ -n "$CUR_SPECIAL" ]; then
-                hyprctl dispatch togglespecialworkspace "${CUR_SPECIAL#special:}"
+                hyprctl dispatch togglespecialworkspace "${CUR_SPECIAL#special:}" >/dev/null 2>&1
             fi
             if ! pgrep -x spotify >/dev/null 2>&1 && ! pgrep -f "spotify-launcher" >/dev/null 2>&1; then
                 spotify >/dev/null 2>&1 &
-                sleep 0.3
+                sleep 0.25
             fi
-            hyprctl dispatch togglespecialworkspace spotify
+            hyprctl --batch "keyword animation specialWorkspace, 1, 1.4, micro, slidevert 100% ; dispatch togglespecialworkspace spotify" >/dev/null 2>&1
         fi
         ;;
 
     toggle_extra)
-        hyprctl keyword animation "specialWorkspace, 1, 1.4, micro, slidevert -100%" >/dev/null 2>&1
         if [ "$CUR_SPECIAL" = "special:extra" ]; then
-            hyprctl dispatch togglespecialworkspace extra
-        else
+            hyprctl --batch "keyword animation specialWorkspace, 1, 1.4, micro, slidevert -100% ; dispatch togglespecialworkspace extra" >/dev/null 2>&1
+        elif [ "${EXTRA_COUNT:-0}" -gt 0 ]; then
             if [ -n "$CUR_SPECIAL" ]; then
-                hyprctl dispatch togglespecialworkspace "${CUR_SPECIAL#special:}"
+                hyprctl dispatch togglespecialworkspace "${CUR_SPECIAL#special:}" >/dev/null 2>&1
             fi
-            hyprctl dispatch togglespecialworkspace extra
+            hyprctl --batch "keyword animation specialWorkspace, 1, 1.4, micro, slidevert -100% ; dispatch togglespecialworkspace extra" >/dev/null 2>&1
+        else
+            notify-send -a Monolith -i emblem-shared -t 1500 "Extra Shelf is empty" "Stash a window: SUPER + Alt + S or SUPER + scroll up"
         fi
         ;;
 esac
 
-# Signal Waybar to immediately refresh spatial tab badge
 pkill -RTMIN+8 waybar 2>/dev/null || true
