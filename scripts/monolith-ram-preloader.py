@@ -91,25 +91,28 @@ def is_monolith_session_active():
 
 
 def ensure_ramvault_hidden():
-    """Guarantees special:ramvault is never open as a visible overlay on any monitor."""
+    """Guarantees special:ramvault or unwanted scratchpad overlay is never open."""
     try:
         raw = subprocess.getoutput("hyprctl -j monitors 2>/dev/null")
         mons = json.loads(raw) if raw else []
         for m in mons:
             sp = m.get("specialWorkspace", {}).get("name", "")
             if sp == "special:ramvault":
-                subprocess.run(
-                    ["hyprctl", "dispatch", "togglespecialworkspace", "ramvault"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
+                mname = m.get("name", "")
+                if mname:
+                    subprocess.run(
+                        ["hyprctl", "--batch", f"dispatch focusmonitor {mname}; dispatch togglespecialworkspace ramvault"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
     except Exception:
         pass
 
 
 def ensure_warm_vault_instance(app):
     """
-    Pre-spawns `app` silently into `special:ramvault` with `noinitialfocus` and
-    `misc:focus_on_activate=false` so it NEVER steals focus or opens an overlay.
+    Pre-spawns `app` silently into off-screen workspace `name:ramvault` with `noinitialfocus`
+    and `misc:focus_on_activate=false` so it NEVER steals focus, opens an overlay,
+    or intercepts mouse clicks on the active desktop.
     """
     if not is_monolith_session_active():
         return False
@@ -131,30 +134,24 @@ def ensure_warm_vault_instance(app):
     except Exception:
         pass
 
-    # Disable focus_on_activate so Wayland xdg_activation_v1 from Firefox/Electron never opens special:ramvault
+    # Disable focus_on_activate so Wayland xdg_activation_v1 never forces an unwanted workspace switch
     subprocess.run(
         ["hyprctl", "keyword", "misc:focus_on_activate", "false"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
     clean_cmd = resolve_executable(exec_cmd)
-    if "spotify" in match_cls.lower():
-        subprocess.Popen(
-            ["hyprctl", "dispatch", "exec", f"[workspace special:spotify silent; noinitialfocus] {clean_cmd}"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-    else:
-        subprocess.Popen(
-            ["hyprctl", "dispatch", "exec", f"[workspace special:ramvault silent; noinitialfocus] {clean_cmd}"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+    subprocess.Popen(
+        ["hyprctl", "dispatch", "exec", f"[workspace name:ramvault silent; noinitialfocus] {clean_cmd}"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
 
     ensure_ramvault_hidden()
     return True
 
 
 def kill_warm_vault_instance(app):
-    """If an app is unloaded from RAM and is sitting hidden in special:ramvault, close it."""
+    """If an app is unloaded from RAM and is sitting hidden in ramvault, close it."""
     if not is_monolith_session_active():
         return
     match_cls = app.get("match_class", "") or app.get("id", "")
@@ -168,7 +165,7 @@ def kill_warm_vault_instance(app):
             cls = c.get("class", "")
             ws_name = c.get("workspace", {}).get("name", "")
             addr = c.get("address", "")
-            if ws_name == "special:ramvault" and addr and (cls.lower() == match_cls.lower() or match_cls.lower() in cls.lower()):
+            if ws_name in ("ramvault", "name:ramvault", "special:ramvault") and addr and (cls.lower() == match_cls.lower() or match_cls.lower() in cls.lower()):
                 subprocess.Popen(
                     ["hyprctl", "dispatch", f"closewindow address:{addr}"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL

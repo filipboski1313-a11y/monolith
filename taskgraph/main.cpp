@@ -647,12 +647,12 @@ static void check_desktop_state() {
             bool is_fullscreen = c.value("fullscreen", false);
 
             if (is_fullscreen) fullscreen_on_ws[ws] = true;
-            if (!is_floating && ws_name.rfind("special:", 0) != 0) {
+            if (!is_floating && ws_name.rfind("special:", 0) != 0 && ws_name.find("ramvault") == std::string::npos) {
                 tiled_on_ws[ws]++;
             }
 
             active_addresses.insert(addr);
-            if (ws_name != "special:ramvault") {
+            if (ws_name.find("ramvault") == std::string::npos) {
                 unpinned_candidates[addr] = c;
             }
         }
@@ -824,7 +824,7 @@ static void hypr_socket_listener_thread() {
                     check_desktop_state();
                     for (const auto& tmpl : g_graph.pinned_templates) {
                         if (tmpl.load_to_ram) {
-                            exec_bg("/usr/local/bin/monolith-ram-preloader warm \"" + tmpl.id + "\"");
+                            exec_bg("monolith-ram-preloader warm \"" + tmpl.id + "\"");
                         }
                     }
                     return G_SOURCE_REMOVE;
@@ -1475,7 +1475,7 @@ static void focus_or_launch_node(const AppNode& node) {
             HyprIPC::dispatch("focuswindow address:" + node.hypr_address);
         }
     } else if (!node.exec_cmd.empty()) {
-        exec_bg("/usr/local/bin/monolith-ram-preloader boost 3.5");
+        exec_bg("monolith-ram-preloader boost 3.5");
         exec_bg(node.exec_cmd);
     }
 }
@@ -1577,7 +1577,7 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
                     if (o->da) gtk_widget_queue_draw(o->da);
                 }
                 std::string action = target_node.load_to_ram ? "load" : "unload";
-                exec_bg("/usr/local/bin/monolith-ram-preloader " + action + " \"" + target_node.id + "\"");
+                exec_bg("monolith-ram-preloader " + action + " \"" + target_node.id + "\"");
             } else if (clicked_item == 4 && target_node.is_running && !target_node.hypr_address.empty()) {
                 HyprIPC::dispatch("closewindow address:" + target_node.hypr_address);
             }

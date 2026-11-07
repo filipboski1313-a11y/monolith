@@ -29,8 +29,8 @@ ACTIVE_CLASS=$(printf '%s' "$ACTIVE_JSON" | jq -r '.class // empty' 2>/dev/null)
 ACTIVE_ADDR=$(printf '%s' "$ACTIVE_JSON" | jq -r '.address // empty' 2>/dev/null)
 ACTIVE_WS=$(printf '%s' "$ACTIVE_JSON" | jq -r '.workspace.name // empty' 2>/dev/null)
 
-# If the window is inside special:ramvault, kill it directly
-if [ "$ACTIVE_WS" = "special:ramvault" ]; then
+# If the window is inside ramvault, kill it directly
+if [ "$ACTIVE_WS" = "ramvault" ] || [ "$ACTIVE_WS" = "name:ramvault" ] || [ "$ACTIVE_WS" = "special:ramvault" ]; then
     if [ -n "$ACTIVE_ADDR" ]; then
         hyprctl dispatch closewindow "address:$ACTIVE_ADDR" >/dev/null 2>&1
     else
@@ -49,18 +49,13 @@ if [ -n "$ACTIVE_CLASS" ] && [ -f "$CFG" ]; then
     ' "$CFG" 2>/dev/null | head -n 1)
 
     if [ -n "$IS_RAM_LOCKED" ]; then
-        # Check if there is already another instance in special:ramvault
+        # Check if there is already another instance in ramvault
         ALREADY_IN_VAULT=$(hyprctl clients -j 2>/dev/null | jq --arg cls "$ACTIVE_CLASS" --arg addr "$ACTIVE_ADDR" '
-            [.[] | select(.workspace.name == "special:ramvault" and .address != $addr and ((.class | ascii_downcase) == ($cls | ascii_downcase)))] | length
+            [.[] | select((.workspace.name == "ramvault" or .workspace.name == "name:ramvault" or .workspace.name == "special:ramvault") and .address != $addr and ((.class | ascii_downcase) == ($cls | ascii_downcase)))] | length
         ' 2>/dev/null || echo 0)
 
-        if [ "${ACTIVE_CLASS,,}" = "spotify" ]; then
-            hyprctl dispatch movetoworkspacesilent "special:spotify,address:$ACTIVE_ADDR" >/dev/null 2>&1
-            if [ "$CUR_SPECIAL" = "special:spotify" ]; then
-                hyprctl dispatch togglespecialworkspace spotify >/dev/null 2>&1
-            fi
-        elif [ "${ALREADY_IN_VAULT:-0}" -eq 0 ]; then
-            hyprctl dispatch movetoworkspacesilent "special:ramvault,address:$ACTIVE_ADDR" >/dev/null 2>&1
+        if [ "${ALREADY_IN_VAULT:-0}" -eq 0 ]; then
+            hyprctl dispatch movetoworkspacesilent "name:ramvault,address:$ACTIVE_ADDR" >/dev/null 2>&1
         else
             if [ -n "$ACTIVE_ADDR" ]; then
                 hyprctl dispatch closewindow "address:$ACTIVE_ADDR" >/dev/null 2>&1
