@@ -805,10 +805,9 @@ static void render_wifi_items(const std::vector<WifiItem>& items) {
             }), btn_pass_conn);
 
             // Cancel button
-            g_signal_connect_data(btn_pass_cancel, "clicked", G_CALLBACK(+[](GtkButton*, gpointer p) {
-                auto* c = static_cast<ConnectContext*>(p);
-                gtk_widget_set_visible(c->pass_box, FALSE);
-            }), ctx, [](gpointer p, GClosure*) { delete static_cast<ConnectContext*>(p); }, (GConnectFlags)0);
+            g_signal_connect(btn_pass_cancel, "clicked", G_CALLBACK(+[](GtkButton*, gpointer p) {
+                gtk_widget_set_visible(GTK_WIDGET(p), FALSE);
+            }), pass_box);
 
             gtk_box_append(GTK_BOX(row), lbl);
             gtk_box_append(GTK_BOX(row), lbl_sig);
