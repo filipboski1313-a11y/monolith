@@ -1,4 +1,4 @@
-# 🏛️ MONOLITH HYPRLAND SHELL
+# MONOLITH HYPRLAND SHELL
 
 > **Ultra-Minimalist • Razor-Sharp • Zero-Bloat • High Performance Native C++20 Desktop Shell**
 
@@ -10,13 +10,13 @@
 
 ---
 
-## 🌟 Overview
+## Overview
 
 **Monolith** is an integrated, custom-crafted graphical environment for Hyprland. Built from scratch in **C++20**, **GTK4**, and **gtk4-layer-shell**, it focuses on uncompromising performance, sub-millisecond responsiveness with zero overhead (no Electron, no bloated scripting frameworks), and pure aesthetic clarity: **pure OLED Black (`#000000`)** paired with architectural silver typography and customizable multi-stop gradients with mathematical film grain.
 
 ---
 
-## ⚡ Core Native Modules
+## Core Native Modules
 
 ### 1. `monolith-settings` (Control Center)
 - Rebuilt native GTK4 + Libadwaita control panel.
@@ -37,29 +37,29 @@
 ### 3. `monolith-toolbox` (Edge Drawer Utility)
 - Edge drawer with smooth hover tracking and dynamic cursor-following indicator (`gtk4-layer-shell`).
 - Built-in utilities:
-  - 󰔛 **Stopwatch**: Millisecond-accurate stopwatch with split/lap recording.
-  - 󰃬 **Calculator**: Keyboard-aware mathematical expression engine.
-  - 󰽉 **Cairo Canvas**: Smooth freehand drawing canvas with instant Wayland clipboard copy.
-  - 󰈙 **Scratchpad**: Persistent auto-saving text notes.
+  - **Stopwatch**: Millisecond-accurate stopwatch with split/lap recording.
+  - **Calculator**: Keyboard-aware mathematical expression engine.
+  - **Cairo Canvas**: Smooth freehand drawing canvas with instant Wayland clipboard copy.
+  - **Scratchpad**: Persistent auto-saving text notes.
 
 ### 4. `monolith-popup` (Native Status Bar Popups)
 - Microsecond-fast OLED overlay popups for Waybar modules (`gtk4-layer-shell`):
-  - 󰕾 **Audio**: Volume sliders, source microphone controls, quick mute toggle, and Pavucontrol launcher.
-  - 󰖩 **Network**: Wi-Fi radio switch, network list with signal strength, and one-click connection.
-  - 󰂯 **Bluetooth**: Radio power switch, paired device list, quick connect/disconnect, and pairing launcher.
-  - 󰍛 **System Resources**: Live CPU load and RAM usage bars with top process monitor.
-  - 󰐥 **Power Menu**: Clean action buttons (Lock Screen, Suspend, Reboot, Power Off, Log Out).
+  - **Audio**: Volume sliders, source microphone controls, quick mute toggle, and Pavucontrol launcher.
+  - **Network**: Wi-Fi radio switch, network list with signal strength, and one-click connection.
+  - **Bluetooth**: Radio power switch, paired device list, quick connect/disconnect, and pairing launcher.
+  - **System Resources**: Live CPU load and RAM usage bars with top process monitor.
+  - **Power Menu**: Clean action buttons (Lock Screen, Suspend, Reboot, Power Off, Log Out).
 - **Smart Toggle**: Clicking the bar icon again, clicking outside, or pressing `Escape` dismisses the popup instantly.
 
 ### 5. Waybar Pinnable System Drawer
 - **Minimalist Hover Mode**: Drawer slides out smoothly on mouse hover, auto-collapsing when the mouse departs.
-- **One-Click Pinning**: Clicking the drawer icon (`󰍜`) pins the drawer permanently open on the bar; clicking again unpins it.
+- **One-Click Pinning**: Clicking the drawer icon pins the drawer permanently open on the bar; clicking again unpins it.
 - Seamless in-place reload via `SIGUSR2` with zero desktop notifications and zero compositor restarts.
 
 ### 6. Spatial Tabs & Window Shelf
 - **Spatial Tabs**:
-  - `Up (▲)`: Dedicated Spotify media workspace (`special:spotify`).
-  - `Down (▼)`: Dedicated Extra shelf workspace (`special:extra`).
+  - `Up`: Dedicated Spotify media workspace (`special:spotify`).
+  - `Down`: Dedicated Extra shelf workspace (`special:extra`).
   - Single-step barrier gestures with vertical sliding animations.
 - **Window Shelf**:
   - `Super + S`: Stash active window to the hidden Extra shelf.
@@ -70,7 +70,7 @@
 
 ---
 
-## ⌨️ Keybindings
+## Keybindings
 
 | Shortcut | Action |
 | :--- | :--- |
@@ -92,7 +92,7 @@
 
 ---
 
-## 📦 Dependencies
+## Dependencies
 
 ### System Packages & Libraries:
 - **Wayland Compositor & Core Tools**: `hyprland`, `waybar`, `fuzzel`, `foot`, `swaync`, `hyprpaper`, `hypridle`, `hyprlock`, `hyprsunset`
@@ -102,7 +102,7 @@
 
 ---
 
-## 🚀 Installation
+## Installation
 
 1. Clone repository to your config directory:
    ```bash
@@ -123,7 +123,7 @@
 
 ---
 
-## 📂 Directory Structure
+## Directory Structure
 
 ```text
 ~/.config/monolith/
@@ -149,6 +149,6 @@
 
 ---
 
-## 📜 License
+## License
 
 Released under the [MIT License](LICENSE).
