@@ -132,6 +132,13 @@ def ensure_warm_vault_instance(app):
     except Exception:
         pass
 
+    # Set Hyprland windowrule dynamically so any child processes land directly in special:hidden
+    rule_cmd = f"workspace special:hidden silent, match:class (?i).*{match_cls}.*"
+    subprocess.run(
+        ["hyprctl", "keyword", "windowrule", rule_cmd],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
     clean_cmd = resolve_executable(exec_cmd)
     subprocess.Popen(
         ["hyprctl", "dispatch", "exec", f"[workspace special:hidden silent; noinitialfocus] {clean_cmd}"],
@@ -141,7 +148,7 @@ def ensure_warm_vault_instance(app):
     # For Flatpaks or multi-process wrappers that fork outside initial exec rule,
     # tuck the window into special:hidden as soon as its surface maps
     def _tuck_window():
-        for _ in range(45):
+        for _ in range(50):
             time.sleep(0.08)
             raw = subprocess.getoutput("hyprctl -j clients 2>/dev/null")
             try:
@@ -162,7 +169,7 @@ def ensure_warm_vault_instance(app):
 
     t = threading.Thread(target=_tuck_window, daemon=False)
     t.start()
-    t.join(timeout=1.2)
+    t.join(timeout=1.8)
     return True
 
 

@@ -53,8 +53,8 @@ fi
 if [ -n "$ACTIVE_CLASS" ] && [ -f "$CFG" ]; then
     IS_RAM_LOCKED=$(jq -r --arg cls "$ACTIVE_CLASS" '
         .pinned[]? | select(.load_to_ram == true) |
-        select((.match_class | ascii_downcase) == ($cls | ascii_downcase) or
-               (($cls | ascii_downcase) | contains(.match_class | ascii_downcase))) |
+        select((.match_class // "") as $m |
+               (($m != "") and (($cls | ascii_downcase) | contains($m | ascii_downcase)))) |
         .id
     ' "$CFG" 2>/dev/null | head -n 1)
 
