@@ -17,11 +17,53 @@ import json
 import time
 import sqlite3
 import subprocess
+import shutil
 import re
 from concurrent.futures import ThreadPoolExecutor
 
 CONFIG_PATH = os.path.expanduser("~/.config/monolith/taskgraph/config.json")
 BOOST_LOCK_FILE = "/tmp/.monolith_boost.lock"
+
+
+def resolve_executable(cmd):
+    """
+    Intelligently resolves executable binary paths, Flatpaks, or local binaries.
+    Ensures background warm-spawning and preloading always find the exact binary.
+    """
+    if not cmd:
+        return cmd
+    parts = cmd.split("||")
+    for part in parts:
+        part = part.strip()
+        tokens = part.split()
+        if not tokens:
+            continue
+        first = tokens[0]
+        if shutil.which(first) or (os.path.isabs(first) and os.path.exists(first)):
+            return part
+        local_bin = os.path.expanduser(f"~/.local/bin/{first}")
+        if os.path.exists(local_bin):
+            tokens[0] = local_bin
+            return " ".join(tokens)
+
+    first_token = cmd.split("||")[0].strip().split()[0].lower() if cmd.strip() else ""
+    flatpak_map = {
+        "obsidian": "md.obsidian.Obsidian",
+        "vesktop": "dev.vencord.Vesktop",
+        "discord": "com.discordapp.Discord",
+        "caprine": "com.sindresorhus.Caprine",
+        "signal": "org.signal.Signal",
+        "signal-desktop": "org.signal.Signal",
+        "localsend": "org.localsend.localsend_app",
+        "steam": "com.valvesoftware.Steam",
+        "prismlauncher": "org.prismlauncher.PrismLauncher",
+        "chromium": "org.chromium.Chromium",
+        "opera-gx": "com.opera.opera-gx",
+    }
+    if first_token in flatpak_map:
+        return f"flatpak run {flatpak_map[first_token]}"
+
+    return cmd.split("||")[0].strip()
 
 
 def send_notification(summary, body, urgency="normal"):
@@ -95,7 +137,7 @@ def ensure_warm_vault_instance(app):
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
-    clean_cmd = exec_cmd.split("||")[0].strip()
+    clean_cmd = resolve_executable(exec_cmd)
     if "spotify" in match_cls.lower():
         subprocess.Popen(
             ["hyprctl", "dispatch", "exec", f"[workspace special:spotify silent; noinitialfocus] {clean_cmd}"],
@@ -469,6 +511,14 @@ def load_app_command(target_name_or_id):
     else:
         trigger_cpu_boost_burst(3.5)
         count, sz = preload_app(target_name_or_id, target_name_or_id, target_name_or_id)
+        dyn_app = {
+            "id": target_name_or_id,
+            "name": target_name_or_id,
+            "exec": resolve_executable(target_name_or_id),
+            "match_class": target_name_or_id,
+            "load_to_ram": True
+        }
+        ensure_warm_vault_instance(dyn_app)
 
 
 def unload_app_command(target_name_or_id):

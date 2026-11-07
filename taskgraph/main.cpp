@@ -1515,13 +1515,67 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
                 if (!target_node.is_pinned) {
                     target_node.load_to_ram = false;
                 }
+                bool found = false;
+                for (auto& tmpl : g_graph.pinned_templates) {
+                    if (tmpl.id == target_node.id) {
+                        tmpl.load_to_ram = target_node.load_to_ram;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && target_node.is_pinned) {
+                    g_graph.pinned_templates.push_back({
+                        target_node.id, target_node.name, target_node.icon_name,
+                        target_node.exec_cmd, target_node.match_class, target_node.load_to_ram
+                    });
+                } else if (found && !target_node.is_pinned) {
+                    g_graph.pinned_templates.erase(
+                        std::remove_if(g_graph.pinned_templates.begin(), g_graph.pinned_templates.end(),
+                            [&](const PinnedTemplate& t){ return t.id == target_node.id; }),
+                        g_graph.pinned_templates.end()
+                    );
+                }
                 save_config();
+                for (auto* o : g_graph.outputs) {
+                    if (!o) continue;
+                    for (auto& n : o->nodes) {
+                        if (n.id == target_node.id) {
+                            n.is_pinned = target_node.is_pinned;
+                            n.load_to_ram = target_node.load_to_ram;
+                        }
+                    }
+                    if (o->da) gtk_widget_queue_draw(o->da);
+                }
             } else if (clicked_item == 3) {
                 target_node.load_to_ram = !target_node.load_to_ram;
                 if (target_node.load_to_ram) {
                     target_node.is_pinned = true;
                 }
+                bool found = false;
+                for (auto& tmpl : g_graph.pinned_templates) {
+                    if (tmpl.id == target_node.id) {
+                        tmpl.load_to_ram = target_node.load_to_ram;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && target_node.load_to_ram) {
+                    g_graph.pinned_templates.push_back({
+                        target_node.id, target_node.name, target_node.icon_name,
+                        target_node.exec_cmd, target_node.match_class, target_node.load_to_ram
+                    });
+                }
                 save_config();
+                for (auto* o : g_graph.outputs) {
+                    if (!o) continue;
+                    for (auto& n : o->nodes) {
+                        if (n.id == target_node.id) {
+                            n.is_pinned = target_node.is_pinned;
+                            n.load_to_ram = target_node.load_to_ram;
+                        }
+                    }
+                    if (o->da) gtk_widget_queue_draw(o->da);
+                }
                 std::string action = target_node.load_to_ram ? "load" : "unload";
                 exec_bg("/usr/local/bin/monolith-ram-preloader " + action + " \"" + target_node.id + "\"");
             } else if (clicked_item == 4 && target_node.is_running && !target_node.hypr_address.empty()) {
