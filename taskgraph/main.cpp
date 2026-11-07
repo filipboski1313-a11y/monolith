@@ -1642,19 +1642,21 @@ static void focus_or_launch_node(OutputWindow* out, const AppNode& node) {
     }
 }
 
-static void on_left_click(GtkGestureClick* gesture, int, double x, double y, gpointer user_data) {
+static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpointer user_data) {
     OutputWindow* out = static_cast<OutputWindow*>(user_data);
     if (!out) return;
     out->is_covered = false;
     ensure_physics_timer_running();
+
+    out->dragged_node_idx = -1;
 
     if (out->menu_open) {
         double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
         double my = std::clamp(out->menu_y, 42.0, out->height - out->menu_h - 15.0);
 
         if (out->menu_node_idx >= 0 && out->menu_node_idx < static_cast<int>(out->nodes.size())) {
-            if (x >= mx && x <= mx + out->menu_w && y >= my + 40.0 && y <= my + out->menu_h) {
-                int clicked_item = static_cast<int>((y - (my + 40.0)) / 32.0);
+            if (start_x >= mx && start_x <= mx + out->menu_w && start_y >= my + 40.0 && start_y <= my + out->menu_h) {
+                int clicked_item = static_cast<int>((start_y - (my + 40.0)) / 32.0);
                 auto& target_node = out->nodes[out->menu_node_idx];
 
                 if (clicked_item == 0) {
@@ -1749,8 +1751,8 @@ static void on_left_click(GtkGestureClick* gesture, int, double x, double y, gpo
                 return;
             }
         } else if (out->menu_node_idx == -2) {
-            if (x >= mx && x <= mx + out->menu_w && y >= my + 40.0 && y <= my + out->menu_h) {
-                int clicked_item = static_cast<int>((y - (my + 40.0)) / 32.0);
+            if (start_x >= mx && start_x <= mx + out->menu_w && start_y >= my + 40.0 && start_y <= my + out->menu_h) {
+                int clicked_item = static_cast<int>((start_y - (my + 40.0)) / 32.0);
                 if (clicked_item == 0) {
                     out->scale = std::clamp(out->scale + 0.10, 0.40, 2.50);
                 } else if (clicked_item == 1) {
@@ -1790,34 +1792,13 @@ static void on_left_click(GtkGestureClick* gesture, int, double x, double y, gpo
         return;
     }
 
-    GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
-    bool is_modifier = (state & (GDK_CONTROL_MASK | GDK_SUPER_MASK | GDK_SHIFT_MASK)) != 0;
-    if (is_modifier) return;
-
-    int idx = hit_test_node(out, x, y);
-    if (idx >= 0 && idx < static_cast<int>(out->nodes.size())) {
-        focus_or_launch_node(out, out->nodes[idx]);
-    }
-}
-
-static void on_drag_begin(GtkGestureDrag* gesture, double start_x, double start_y, gpointer user_data) {
-    OutputWindow* out = static_cast<OutputWindow*>(user_data);
-    if (!out) return;
-    out->is_covered = false;
-    ensure_physics_timer_running();
-
-    out->dragged_node_idx = -1;
-    if (out->menu_open) return;
-
-    GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
-    bool is_modifier = (state & (GDK_CONTROL_MASK | GDK_SUPER_MASK | GDK_SHIFT_MASK)) != 0;
-
     int idx = hit_test_node(out, start_x, start_y);
-    if (idx >= 0 && is_modifier) {
-        out->dragged_node_idx = idx;
-        out->drag_start_x = start_x;
-        out->drag_start_y = start_y;
-        out->drag_dist = 0.0;
+    out->dragged_node_idx = idx;
+    out->drag_start_x = start_x;
+    out->drag_start_y = start_y;
+    out->drag_dist = 0.0;
+
+    if (idx >= 0) {
         out->nodes[idx].is_dragged = true;
         out->nodes[idx].vx = 0.0;
         out->nodes[idx].vy = 0.0;
@@ -1845,6 +1826,10 @@ static void on_drag_end(GtkGestureDrag*, double, double, gpointer user_data) {
     if (out->dragged_node_idx >= 0 && out->dragged_node_idx < static_cast<int>(out->nodes.size())) {
         auto& node = out->nodes[out->dragged_node_idx];
         node.is_dragged = false;
+
+        if (out->drag_dist < 15.0) {
+            focus_or_launch_node(out, node);
+        }
     }
 
     out->dragged_node_idx = -1;
@@ -2040,11 +2025,6 @@ static void sync_output_windows(GApplication* app) {
                 out->da = gtk_drawing_area_new();
                 gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(out->da), draw_graph, out, nullptr);
                 gtk_window_set_child(GTK_WINDOW(out->win), out->da);
-
-                GtkGesture* left_click = gtk_gesture_click_new();
-                gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(left_click), GDK_BUTTON_PRIMARY);
-                g_signal_connect(left_click, "pressed", G_CALLBACK(on_left_click), out);
-                gtk_widget_add_controller(out->da, GTK_EVENT_CONTROLLER(left_click));
 
                 GtkGesture* drag = gtk_gesture_drag_new();
                 g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), out);
