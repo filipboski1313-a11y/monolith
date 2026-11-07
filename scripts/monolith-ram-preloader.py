@@ -15,6 +15,7 @@ import sys
 import os
 import json
 import time
+import threading
 import sqlite3
 import subprocess
 import shutil
@@ -110,27 +111,76 @@ def ensure_ramvault_hidden():
 
 def ensure_warm_vault_instance(app):
     """
-    Preloads application into kernel RAM pagecache and ensures zero unwanted pop-ups.
+    Pre-spawns `app` silently into `special:hidden` so clicking the constellation summons it in <1ms.
     """
+    if not is_monolith_session_active():
+        return False
+
+    match_cls = app.get("match_class", "") or app.get("id", "")
+    exec_cmd = app.get("exec", "")
+    if not exec_cmd or not match_cls:
+        return False
+
+    # Check if already running anywhere in Hyprland
+    try:
+        raw = subprocess.getoutput("hyprctl -j clients 2>/dev/null")
+        clients = json.loads(raw) if raw else []
+        for c in clients:
+            cls = c.get("class", "")
+            if cls and match_cls and (cls.lower() == match_cls.lower() or match_cls.lower() in cls.lower()):
+                return True
+    except Exception:
+        pass
+
+    clean_cmd = resolve_executable(exec_cmd)
+    subprocess.Popen(
+        ["hyprctl", "dispatch", "exec", f"[workspace special:hidden silent; noinitialfocus] {clean_cmd}"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    # For Flatpaks or multi-process wrappers that fork outside initial exec rule,
+    # tuck the window into special:hidden as soon as its surface maps
+    def _tuck_window():
+        for _ in range(45):
+            time.sleep(0.08)
+            raw = subprocess.getoutput("hyprctl -j clients 2>/dev/null")
+            try:
+                clients = json.loads(raw) if raw else []
+                for c in clients:
+                    cls = c.get("class", "")
+                    addr = c.get("address", "")
+                    ws = c.get("workspace", {}).get("name", "")
+                    if addr and match_cls and (cls.lower() == match_cls.lower() or match_cls.lower() in cls.lower()):
+                        if ws != "special:hidden":
+                            subprocess.run(
+                                ["hyprctl", "dispatch", "movetoworkspacesilent", f"special:hidden,address:{addr}"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                            )
+                        return
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_tuck_window, daemon=False)
+    t.start()
+    t.join(timeout=1.2)
     return True
 
 
 def kill_warm_vault_instance(app):
-    """If an app is unloaded from RAM and is sitting hidden in ramvault, close it."""
+    """If an app is unloaded from RAM and is sitting hidden in special:hidden, close it."""
     if not is_monolith_session_active():
         return
     match_cls = app.get("match_class", "") or app.get("id", "")
     if not match_cls:
         return
     try:
-        ensure_ramvault_hidden()
         raw = subprocess.getoutput("hyprctl -j clients 2>/dev/null")
         clients = json.loads(raw) if raw else []
         for c in clients:
             cls = c.get("class", "")
             ws_name = c.get("workspace", {}).get("name", "")
             addr = c.get("address", "")
-            if ws_name in ("ramvault", "name:ramvault", "special:ramvault") and addr and (cls.lower() == match_cls.lower() or match_cls.lower() in cls.lower()):
+            if ws_name in ("special:hidden", "ramvault", "name:ramvault", "special:ramvault") and addr and (cls.lower() == match_cls.lower() or match_cls.lower() in cls.lower()):
                 subprocess.Popen(
                     ["hyprctl", "dispatch", f"closewindow address:{addr}"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL

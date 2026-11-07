@@ -659,7 +659,7 @@ static void setup_file_monitors() {
 static std::string format_ws_badge(int ws_id, const std::string& ws_name) {
     if (ws_name.find("spotify") != std::string::npos) return "S";
     if (ws_name.find("extra") != std::string::npos) return "E";
-    if (ws_name.find("ramvault") != std::string::npos) return "V";
+    if (ws_name.find("hidden") != std::string::npos || ws_name.find("ramvault") != std::string::npos) return "V";
     if (ws_id > 0) return "W" + std::to_string(ws_id);
     return "-";
 }
@@ -726,12 +726,12 @@ static void check_desktop_state() {
             bool is_fullscreen = c.value("fullscreen", false);
 
             if (is_fullscreen) fullscreen_on_ws[ws] = true;
-            if (!is_floating && ws_name.rfind("special:", 0) != 0 && ws_name.find("ramvault") == std::string::npos) {
+            if (!is_floating && ws_name.rfind("special:", 0) != 0 && ws_name.find("ramvault") == std::string::npos && ws_name.find("hidden") == std::string::npos) {
                 tiled_on_ws[ws]++;
             }
 
             active_addresses.insert(addr);
-            if (ws_name.find("ramvault") == std::string::npos) {
+            if (ws_name.find("ramvault") == std::string::npos && ws_name.find("hidden") == std::string::npos) {
                 unpinned_candidates[addr] = c;
             }
         }
@@ -743,7 +743,7 @@ static void check_desktop_state() {
             int ws = mon_active_ws.count(mname) ? mon_active_ws[mname] : active_ws_id;
             std::string sp = mon_special_ws.count(mname) ? mon_special_ws[mname] : "";
 
-            bool this_mon_special = (!sp.empty() && sp != "null" && sp != "special:ramvault");
+            bool this_mon_special = (!sp.empty() && sp != "null" && sp != "special:ramvault" && sp != "special:hidden");
             bool this_mon_fs = fullscreen_on_ws[ws];
             bool this_mon_tiled = (tiled_on_ws[ws] > 0);
 
@@ -1608,14 +1608,32 @@ static int hit_test_node(OutputWindow* out, double x, double y) {
     return -1;
 }
 
-static void focus_or_launch_node(const AppNode& node) {
+static void focus_or_launch_node(OutputWindow* out, const AppNode& node) {
     if (node.is_running && !node.hypr_address.empty()) {
         if (node.workspace_label == "V" || node.workspace_label == "E") {
-            std::string target_ws = std::to_string(std::max(1, g_graph.active_ws_id));
-            HyprIPC::batch({
-                "dispatch movetoworkspace " + target_ws + ",address:" + node.hypr_address,
-                "dispatch focuswindow address:" + node.hypr_address
-            });
+            int target_ws_id = g_graph.active_ws_id;
+            std::string mon_raw = HyprIPC::request("j/monitors");
+            if (!mon_raw.empty() && out) {
+                try {
+                    json mj = json::parse(mon_raw);
+                    if (mj.is_array()) {
+                        for (const auto& mon : mj) {
+                            if (mon.value("name", "") == out->name) {
+                                target_ws_id = mon.value("activeWorkspace", json::object()).value("id", target_ws_id);
+                                break;
+                            }
+                        }
+                    }
+                } catch (...) {}
+            }
+            std::string target_ws = std::to_string(std::max(1, target_ws_id));
+            std::vector<std::string> cmds;
+            if (out && !out->name.empty()) {
+                cmds.push_back("dispatch focusmonitor " + out->name);
+            }
+            cmds.push_back("dispatch movetoworkspace " + target_ws + ",address:" + node.hypr_address);
+            cmds.push_back("dispatch focuswindow address:" + node.hypr_address);
+            HyprIPC::batch(cmds);
             check_desktop_state();
         } else if (node.workspace_label == "S") {
             HyprIPC::dispatch("togglespecialworkspace spotify");
@@ -1625,6 +1643,9 @@ static void focus_or_launch_node(const AppNode& node) {
     } else if (!node.exec_cmd.empty() || !node.id.empty()) {
         std::string launch_cmd = resolve_app_command(node.id, node.exec_cmd);
         exec_bg("monolith-ram-preloader boost 3.5");
+        if (out && !out->name.empty()) {
+            HyprIPC::dispatch("focusmonitor " + out->name);
+        }
         HyprIPC::dispatch("exec sh -c \"" + launch_cmd + "\"");
     }
 }
@@ -1646,7 +1667,7 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
             auto& target_node = out->nodes[out->menu_node_idx];
 
             if (clicked_item == 0) {
-                focus_or_launch_node(target_node);
+                focus_or_launch_node(out, target_node);
             } else if (clicked_item == 1) {
                 if (target_node.is_running && !target_node.hypr_address.empty()) {
                     if (target_node.workspace_label == "E") {
@@ -1824,7 +1845,7 @@ static void on_drag_end(GtkGestureDrag*, double, double, gpointer user_data) {
         node.is_dragged = false;
 
         if (out->drag_dist < 6.0) {
-            focus_or_launch_node(node);
+            focus_or_launch_node(out, node);
         }
     }
 

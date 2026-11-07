@@ -39,6 +39,40 @@ if [ "$ACTIVE_WS" = "ramvault" ] || [ "$ACTIVE_WS" = "name:ramvault" ] || [ "$AC
     exit 0
 fi
 
+# If the window is inside special:hidden or ramvault, kill it directly
+if [ "$ACTIVE_WS" = "special:hidden" ] || [ "$ACTIVE_WS" = "ramvault" ] || [ "$ACTIVE_WS" = "name:ramvault" ] || [ "$ACTIVE_WS" = "special:ramvault" ]; then
+    if [ -n "$ACTIVE_ADDR" ]; then
+        hyprctl dispatch closewindow "address:$ACTIVE_ADDR" >/dev/null 2>&1
+    else
+        hyprctl dispatch killactive >/dev/null 2>&1
+    fi
+    exit 0
+fi
+
+# Check if this window class has load_to_ram == true
+if [ -n "$ACTIVE_CLASS" ] && [ -f "$CFG" ]; then
+    IS_RAM_LOCKED=$(jq -r --arg cls "$ACTIVE_CLASS" '
+        .pinned[]? | select(.load_to_ram == true) |
+        select((.match_class | ascii_downcase) == ($cls | ascii_downcase) or
+               (($cls | ascii_downcase) | contains(.match_class | ascii_downcase))) |
+        .id
+    ' "$CFG" 2>/dev/null | head -n 1)
+
+    if [ -n "$IS_RAM_LOCKED" ]; then
+        # Stash to warm-standby special:hidden vault in <1ms
+        hyprctl dispatch movetoworkspacesilent "special:hidden,address:$ACTIVE_ADDR" >/dev/null 2>&1
+
+        # If we were inside special:extra and it is now empty, close special:extra
+        if [ "$ACTIVE_WS" = "special:extra" ]; then
+            REM_EXTRA=$(hyprctl clients -j 2>/dev/null | jq '[.[] | select(.workspace.name == "special:extra")] | length' 2>/dev/null || echo 0)
+            if [ "${REM_EXTRA:-0}" -eq 0 ]; then
+                hyprctl dispatch togglespecialworkspace extra >/dev/null 2>&1
+            fi
+        fi
+        exit 0
+    fi
+fi
+
 if [ -n "$ACTIVE_ADDR" ]; then
     hyprctl dispatch closewindow "address:$ACTIVE_ADDR" >/dev/null 2>&1
 else
