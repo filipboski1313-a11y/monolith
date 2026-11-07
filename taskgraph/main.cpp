@@ -12,6 +12,7 @@
 #include <unordered_set>
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <atomic>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -37,12 +38,13 @@ static inline std::string get_user_home() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MONOLITH TASK GRAPH 2.0 ("Constellation & Procedural Background Engine")
-//   - Direct Zero-Fork UNIX Socket IPC with Hyprland (.socket.sock & .socket2.sock)
-//   - True 0.00% CPU Sleep: Timer completely stops when desktop is covered
-//   - Unified Procedural Gradient + Mathematical Film Grain Base Layer
-//   - Clean Obsidian Node Discs (lines clip at rim, never deface app icons)
-//   - Workspace Badges (W1..W9, S, E), RAM Cache Beacons, & 5-Action Context Menu
+// MONOLITH CONSTELLATION & PROCEDURAL BACKGROUND ENGINE 2.0
+//   - Multi-Monitor Decoupled State & Per-Output Coordinate System (1:1 Native Resolution)
+//   - Zero-Fork UNIX Socket IPC with Hyprland (.socket.sock & .socket2.sock)
+//   - True 0.00% CPU Sleep: Timer sleeps when all active screens are covered
+//   - Unified Procedural Gradient + Film Grain Base Layer (Native per-display resolution)
+//   - Obsidian Node Discs (clean rim clipping, crisp icons and typography)
+//   - Isolated Per-Display Super Launcher (Fuzzel) Deflection & Hover Highlights
 // ══════════════════════════════════════════════════════════════════════════════
 
 struct AppNode {
@@ -65,7 +67,7 @@ struct AppNode {
     double radius = 18.0;
     double cur_scale = 1.0;
 
-    // Harmonic ambient Lissajous drift
+    // Ambient Lissajous drift parameters
     double drift_phase = 0.0;
     double drift_speed = 0.22;
 
@@ -78,6 +80,15 @@ struct AppEdge {
     double rest_length = 260.0;
 };
 
+struct PinnedTemplate {
+    std::string id;
+    std::string name;
+    std::string icon_name;
+    std::string exec_cmd;
+    std::string match_class;
+    bool load_to_ram = false;
+};
+
 struct OutputWindow {
     GtkWidget* win = nullptr;
     GtkWidget* da = nullptr;
@@ -86,14 +97,38 @@ struct OutputWindow {
     int width = 1920;
     int height = 1080;
     cairo_surface_t* bg_surface = nullptr;
+
+    // Per-output isolated simulation & interaction state
+    std::vector<AppNode> nodes;
+    std::vector<AppEdge> edges;
+    int hovered_idx = -1;
+    int dragged_node_idx = -1;
+    double drag_start_x = 0.0;
+    double drag_start_y = 0.0;
+    double drag_dist = 0.0;
+
+    bool menu_open = false;
+    int menu_node_idx = -1;
+    double menu_x = 0.0;
+    double menu_y = 0.0;
+    double menu_w = 276.0;
+    double menu_h = 198.0;
+    int menu_hovered_item = -1;
+
+    double sim_time = 0.0;
+    double alpha = 1.0;
+    double return_timer = 0.0;
+    bool is_covered = false;
+    bool fuzzel_active = false;
+    bool physics_active = true;
 };
 
 struct GraphState {
     GtkIconTheme* icon_theme = nullptr;
     GApplication* app = nullptr;
 
-    std::vector<AppNode> nodes;
-    std::vector<AppEdge> edges;
+    std::vector<PinnedTemplate> pinned_templates;
+    std::vector<AppEdge> template_edges;
     std::unordered_map<std::string, GdkPixbuf*> icon_cache;
 
     cairo_surface_t* bg_surface = nullptr;
@@ -104,7 +139,7 @@ struct GraphState {
     int screen_w = 1920;
     int screen_h = 1080;
 
-    // Dynamic physics and visual settings loaded from settings.json
+    // Physics parameters loaded from settings.json
     double spring_k = 0.0042;
     double rest_length = 260.0;
     double repulsion = 24000.0;
@@ -118,7 +153,7 @@ struct GraphState {
     double fuzzel_repulsion = 450.0;
     bool auto_freeze = true;
 
-    // Procedural Gradient & Grain settings loaded from settings.json
+    // Procedural gradient & grain parameters
     std::string gradient_type = "diagonal_up";
     std::string color1 = "#000000";
     std::string color2 = "#18181b";
@@ -129,29 +164,7 @@ struct GraphState {
     int grain_scale = 1;
     bool crosshair = false;
 
-    // Simulation & Freeze state
     int active_ws_id = 1;
-    double sim_time = 0.0;
-    double alpha = 1.0;
-    double return_timer = 0.0;
-    bool physics_active = true;
-    bool is_covered = false;
-    bool fuzzel_active = false;
-
-    // Interaction state
-    int dragged_node_idx = -1;
-    double drag_start_x = 0.0;
-    double drag_start_y = 0.0;
-    double drag_dist = 0.0;
-
-    // Right-click context menu
-    bool menu_open = false;
-    int menu_node_idx = -1;
-    double menu_x = 0.0;
-    double menu_y = 0.0;
-    double menu_w = 276.0;
-    double menu_h = 198.0;
-    int menu_hovered_item = -1;
 
     guint physics_timer_id = 0;
     std::atomic<bool> state_check_queued{false};
@@ -161,14 +174,7 @@ static GraphState g_graph;
 
 static gboolean on_physics_tick(gpointer);
 static void sync_output_windows(GApplication* app);
-
-static void queue_all_outputs_redraw() {
-    for (auto* out : g_graph.outputs) {
-        if (out && out->da) {
-            gtk_widget_queue_draw(out->da);
-        }
-    }
-}
+static void check_desktop_state();
 
 static void ensure_physics_timer_running() {
     if (g_graph.physics_timer_id == 0) {
@@ -176,12 +182,20 @@ static void ensure_physics_timer_running() {
     }
 }
 
-static void wake_physics(double new_alpha = 0.65) {
-    g_graph.alpha = std::max(g_graph.alpha, new_alpha);
-    g_graph.physics_active = true;
+static void wake_output_physics(OutputWindow* out, double new_alpha = 0.65) {
+    if (!out) return;
+    out->alpha = std::max(out->alpha, new_alpha);
+    out->physics_active = true;
     ensure_physics_timer_running();
-    queue_all_outputs_redraw();
+    if (out->da) gtk_widget_queue_draw(out->da);
 }
+
+static void wake_all_outputs_physics(double new_alpha = 0.65) {
+    for (auto* out : g_graph.outputs) {
+        if (out) wake_output_physics(out, new_alpha);
+    }
+}
+
 
 static void exec_bg(const std::string& cmd) {
     std::string full = cmd + " > /dev/null 2>&1 &";
@@ -189,7 +203,7 @@ static void exec_bg(const std::string& cmd) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ICON & PROCEDURAL BACKGROUND LOADERS
+// ICON & PROCEDURAL BACKGROUND GENERATOR
 // ──────────────────────────────────────────────────────────────────────────────
 static GdkPixbuf* get_icon_pixbuf(const std::string& icon_name, int size = 24) {
     std::string key = icon_name + "_" + std::to_string(size);
@@ -280,39 +294,165 @@ static void rebuild_output_bg(OutputWindow* out) {
     );
 }
 
-static void rebuild_background_surface() {
-    int w = std::max(g_graph.screen_w, 1280);
-    int h = std::max(g_graph.screen_h, 800);
-
-    if (g_graph.bg_surface) {
-        int cur_w = cairo_image_surface_get_width(g_graph.bg_surface);
-        int cur_h = cairo_image_surface_get_height(g_graph.bg_surface);
-        if (cur_w != w || cur_h != h) {
-            cairo_surface_destroy(g_graph.bg_surface);
-            g_graph.bg_surface = nullptr;
-        }
-    }
-
-    if (!g_graph.bg_surface) {
-        g_graph.bg_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-    }
-
-    render_procedural_grain_to_surface(
-        g_graph.bg_surface,
-        g_graph.grain_algorithm,
-        g_graph.grain_intensity,
-        g_graph.grain_scale,
-        g_graph.gradient_type,
-        g_graph.color1,
-        g_graph.color2,
-        g_graph.color3,
-        g_graph.grain_tint,
-        g_graph.crosshair
-    );
-
+static void rebuild_all_backgrounds() {
     for (auto* out : g_graph.outputs) {
         rebuild_output_bg(out);
     }
+}
+
+static void init_output_nodes(OutputWindow* out, bool preserve_positions = false) {
+    if (!out) return;
+
+    std::unordered_map<std::string, std::pair<double, double>> old_pos;
+    if (preserve_positions) {
+        for (const auto& n : out->nodes) {
+            old_pos[n.id] = {n.x, n.y};
+        }
+    }
+
+    out->nodes.clear();
+    out->edges.clear();
+
+    size_t count = g_graph.pinned_templates.size();
+    if (count == 0) return;
+
+    double cx = out->width / 2.0;
+    double cy = out->height / 2.0;
+    double rx = std::clamp(cx * 0.44, 250.0, 560.0);
+    double ry = std::clamp(cy * 0.48, 170.0, 340.0);
+
+    for (size_t i = 0; i < count; ++i) {
+        const auto& tmpl = g_graph.pinned_templates[i];
+        AppNode n;
+        n.id = tmpl.id;
+        n.name = tmpl.name;
+        n.icon_name = tmpl.icon_name;
+        n.exec_cmd = tmpl.exec_cmd;
+        n.match_class = tmpl.match_class;
+        n.load_to_ram = tmpl.load_to_ram;
+        n.is_pinned = true;
+        n.radius = g_graph.node_radius;
+
+        if (preserve_positions && old_pos.find(n.id) != old_pos.end()) {
+            n.x = old_pos[n.id].first;
+            n.y = old_pos[n.id].second;
+        } else {
+            double angle = (2.0 * M_PI * i) / count - (M_PI / 2.0);
+            n.x = cx + rx * std::cos(angle);
+            n.y = cy + ry * std::sin(angle);
+        }
+
+        n.drift_phase = i * 1.17;
+        n.drift_speed = 0.20 + (i % 7) * 0.02;
+        n.pixbuf = get_icon_pixbuf(n.icon_name, 22);
+
+        out->nodes.push_back(n);
+    }
+
+    auto add_edge = [&](const std::string& a, const std::string& b, double len) {
+        if (a == b) return;
+        bool has_a = false, has_b = false;
+        for (const auto& n : out->nodes) {
+            if (n.id == a) has_a = true;
+            if (n.id == b) has_b = true;
+        }
+        if (!has_a || !has_b) return;
+        for (const auto& e : out->edges) {
+            if ((e.from_id == a && e.to_id == b) || (e.from_id == b && e.to_id == a)) return;
+        }
+        out->edges.push_back({a, b, len});
+    };
+
+    if (!g_graph.template_edges.empty()) {
+        for (const auto& te : g_graph.template_edges) {
+            add_edge(te.from_id, te.to_id, te.rest_length);
+        }
+    } else {
+        if (count >= 2) {
+            for (size_t i = 0; i < count; ++i) {
+                add_edge(out->nodes[i].id, out->nodes[(i + 1) % count].id, 145.0);
+            }
+        }
+        if (count >= 6) {
+            for (size_t i = 0; i < count; i += 2) {
+                add_edge(out->nodes[i].id, out->nodes[(i + 2) % count].id, 260.0);
+            }
+        }
+    }
+}
+
+static void save_config() {
+    std::string path = get_user_home() + "/.config/monolith/taskgraph/config.json";
+    try {
+        json j;
+        j["pinned"] = json::array();
+        for (const auto& tmpl : g_graph.pinned_templates) {
+            json item;
+            item["id"] = tmpl.id;
+            item["name"] = tmpl.name;
+            item["icon"] = tmpl.icon_name;
+            item["exec"] = tmpl.exec_cmd.empty() ? tmpl.name : tmpl.exec_cmd;
+            item["match_class"] = tmpl.match_class.empty() ? tmpl.name : tmpl.match_class;
+            item["load_to_ram"] = tmpl.load_to_ram;
+            j["pinned"].push_back(item);
+        }
+        j["physics"] = {
+            {"repulsion", g_graph.repulsion},
+            {"spring_k", g_graph.spring_k},
+            {"rest_length", g_graph.rest_length},
+            {"damping", g_graph.damping},
+            {"center_gravity", g_graph.center_gravity},
+            {"repulsion_radius", g_graph.repulsion_radius},
+            {"fuzzel_repulsion", g_graph.fuzzel_repulsion}
+        };
+
+        std::ofstream f(path);
+        if (f.is_open()) {
+            f << j.dump(2);
+        }
+    } catch (...) {}
+}
+
+static void load_config(bool preserve_positions = false) {
+    std::string path = get_user_home() + "/.config/monolith/taskgraph/config.json";
+    std::ifstream f(path);
+    if (!f.is_open()) return;
+
+    try {
+        json j;
+        f >> j;
+
+        g_graph.pinned_templates.clear();
+        g_graph.template_edges.clear();
+
+        if (j.contains("pinned") && j["pinned"].is_array()) {
+            for (const auto& item : j["pinned"]) {
+                PinnedTemplate tmpl;
+                tmpl.id = item.value("id", "");
+                tmpl.name = item.value("name", "");
+                tmpl.icon_name = item.value("icon", "");
+                tmpl.exec_cmd = item.value("exec", "");
+                tmpl.match_class = item.value("match_class", "");
+                tmpl.load_to_ram = item.value("load_to_ram", false);
+                g_graph.pinned_templates.push_back(tmpl);
+            }
+        }
+
+        if (j.contains("edges") && j["edges"].is_array()) {
+            for (const auto& item : j["edges"]) {
+                std::string from = item.value("from", "");
+                std::string to = item.value("to", "");
+                double len = item.value("rest_length", g_graph.rest_length);
+                if (!from.empty() && !to.empty()) {
+                    g_graph.template_edges.push_back({from, to, len});
+                }
+            }
+        }
+
+        for (auto* out : g_graph.outputs) {
+            init_output_nodes(out, preserve_positions);
+        }
+    } catch (...) {}
 }
 
 static void load_monolith_settings() {
@@ -342,7 +482,7 @@ static void load_monolith_settings() {
                 n_c2 != g_graph.color2 || n_c3 != g_graph.color3 ||
                 std::abs(n_intensity - g_graph.grain_intensity) > 0.01 ||
                 n_algo != g_graph.grain_algorithm || n_tint != g_graph.grain_tint ||
-                n_scale != g_graph.grain_scale || n_cross != g_graph.crosshair || !g_graph.bg_surface) {
+                n_scale != g_graph.grain_scale || n_cross != g_graph.crosshair) {
                 g_graph.gradient_type = n_gtype;
                 g_graph.color1 = n_c1;
                 g_graph.color2 = n_c2;
@@ -373,8 +513,11 @@ static void load_monolith_settings() {
             g_graph.fuzzel_repulsion = tg.value("fuzzel_repulsion", g_graph.fuzzel_repulsion);
             g_graph.auto_freeze = tg.value("auto_freeze", g_graph.auto_freeze);
 
-            for (auto& n : g_graph.nodes) {
-                n.radius = g_graph.node_radius;
+            for (auto* out : g_graph.outputs) {
+                if (!out) continue;
+                for (auto& n : out->nodes) {
+                    n.radius = g_graph.node_radius;
+                }
             }
 
             if (g_graph.display_output != prev_out && g_graph.app) {
@@ -382,173 +525,11 @@ static void load_monolith_settings() {
             }
         }
 
-        if (bg_changed || !g_graph.bg_surface) {
-            rebuild_background_surface();
+        if (bg_changed) {
+            rebuild_all_backgrounds();
         }
 
-        wake_physics(0.5);
-    } catch (...) {}
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// CONFIGURATION MANAGEMENT (taskgraph/config.json)
-// ──────────────────────────────────────────────────────────────────────────────
-static void check_desktop_state();
-
-static void save_config() {
-    std::string path = get_user_home() + "/.config/monolith/taskgraph/config.json";
-    try {
-        json j;
-        j["pinned"] = json::array();
-        for (const auto& n : g_graph.nodes) {
-            if (n.is_pinned) {
-                json item;
-                item["id"] = n.id;
-                item["name"] = n.name;
-                item["icon"] = n.icon_name;
-                item["exec"] = n.exec_cmd.empty() ? n.name : n.exec_cmd;
-                item["match_class"] = n.match_class.empty() ? n.name : n.match_class;
-                item["load_to_ram"] = n.load_to_ram;
-                j["pinned"].push_back(item);
-            }
-        }
-        j["physics"] = {
-            {"repulsion", g_graph.repulsion},
-            {"spring_k", g_graph.spring_k},
-            {"rest_length", g_graph.rest_length},
-            {"damping", g_graph.damping},
-            {"center_gravity", g_graph.center_gravity},
-            {"repulsion_radius", g_graph.repulsion_radius},
-            {"fuzzel_repulsion", g_graph.fuzzel_repulsion}
-        };
-
-        std::ofstream f(path);
-        if (f.is_open()) {
-            f << j.dump(2);
-        }
-    } catch (...) {}
-}
-
-static void rebuild_default_constellation_edges() {
-    auto add_edge = [](const std::string& a, const std::string& b, double len) {
-        if (a == b) return;
-        bool has_a = false, has_b = false;
-        for (const auto& n : g_graph.nodes) {
-            if (n.id == a) has_a = true;
-            if (n.id == b) has_b = true;
-        }
-        if (!has_a || !has_b) return;
-        for (const auto& e : g_graph.edges) {
-            if ((e.from_id == a && e.to_id == b) || (e.from_id == b && e.to_id == a)) return;
-        }
-        g_graph.edges.push_back({a, b, len});
-    };
-
-    std::vector<std::string> pinned_ids;
-    for (const auto& n : g_graph.nodes) {
-        if (n.is_pinned) pinned_ids.push_back(n.id);
-    }
-
-    size_t m = pinned_ids.size();
-    if (m >= 2) {
-        for (size_t i = 0; i < m; ++i) {
-            add_edge(pinned_ids[i], pinned_ids[(i + 1) % m], 145.0);
-        }
-    }
-    if (m >= 6) {
-        for (size_t i = 0; i < m; i += 2) {
-            add_edge(pinned_ids[i], pinned_ids[(i + 2) % m], 260.0);
-        }
-    }
-}
-
-static void load_config(bool preserve_positions = false) {
-    std::string path = get_user_home() + "/.config/monolith/taskgraph/config.json";
-    std::ifstream f(path);
-    if (!f.is_open()) return;
-
-    try {
-        json j;
-        f >> j;
-
-        // Save existing positions if reloading live
-        std::unordered_map<std::string, std::pair<double, double>> old_pos;
-        if (preserve_positions) {
-            for (const auto& n : g_graph.nodes) {
-                old_pos[n.id] = {n.x, n.y};
-            }
-        }
-
-        g_graph.nodes.clear();
-        g_graph.edges.clear();
-
-        if (j.contains("pinned") && j["pinned"].is_array()) {
-            size_t count = j["pinned"].size();
-
-            std::unordered_map<std::string, std::pair<double, double>> initial_positions = {
-                { "btop",        { 0.500, 0.180 } },
-                { "signal",      { 0.615, 0.204 } },
-                { "telegram",    { 0.712, 0.274 } },
-                { "spotify",     { 0.777, 0.378 } },
-                { "vesktop",     { 0.800, 0.500 } },
-                { "caprine",     { 0.777, 0.622 } },
-                { "qbittorrent", { 0.712, 0.726 } },
-                { "localsend",   { 0.615, 0.796 } },
-                { "dolphin",     { 0.500, 0.820 } },
-                { "obs",         { 0.385, 0.796 } },
-                { "vlc",         { 0.288, 0.726 } },
-                { "gimp",        { 0.223, 0.622 } },
-                { "obsidian",    { 0.200, 0.500 } },
-                { "zen",         { 0.223, 0.378 } },
-                { "firefox",     { 0.288, 0.274 } },
-                { "zed",         { 0.385, 0.204 } }
-            };
-
-            for (size_t i = 0; i < count; ++i) {
-                auto& item = j["pinned"][i];
-                AppNode node;
-                node.id = item.value("id", "");
-                node.name = item.value("name", "");
-                node.icon_name = item.value("icon", "");
-                node.exec_cmd = item.value("exec", "");
-                node.match_class = item.value("match_class", "");
-                node.load_to_ram = item.value("load_to_ram", false);
-                node.is_pinned = true;
-                node.radius = g_graph.node_radius;
-
-                if (old_pos.find(node.id) != old_pos.end()) {
-                    node.x = old_pos[node.id].first;
-                    node.y = old_pos[node.id].second;
-                } else if (initial_positions.find(node.id) != initial_positions.end()) {
-                    auto pos = initial_positions[node.id];
-                    node.x = pos.first * g_graph.screen_w;
-                    node.y = pos.second * g_graph.screen_h;
-                } else {
-                    double angle = (2.0 * M_PI * i) / std::max<size_t>(1, count);
-                    node.x = (g_graph.screen_w / 2.0) + 390.0 * std::cos(angle);
-                    node.y = (g_graph.screen_h / 2.0) + 250.0 * std::sin(angle);
-                }
-
-                node.drift_phase = (i * 1.17);
-                node.drift_speed = 0.20 + (i % 7) * 0.02;
-                node.pixbuf = get_icon_pixbuf(node.icon_name, 22);
-
-                g_graph.nodes.push_back(node);
-            }
-
-            if (j.contains("edges") && j["edges"].is_array() && !j["edges"].empty()) {
-                for (auto& item : j["edges"]) {
-                    std::string from = item.value("from", "");
-                    std::string to = item.value("to", "");
-                    double len = item.value("rest_length", g_graph.rest_length);
-                    if (!from.empty() && !to.empty()) {
-                        g_graph.edges.push_back({from, to, len});
-                    }
-                }
-            } else {
-                rebuild_default_constellation_edges();
-            }
-        }
+        wake_all_outputs_physics(0.5);
     } catch (...) {}
 }
 
@@ -567,7 +548,7 @@ static void setup_file_monitors() {
     }
     g_object_unref(f_set);
 
-    // 2. Monitor taskgraph/config.json (for RAM Preload / Pin updates from Settings UI)
+    // 2. Monitor taskgraph/config.json
     GFile* f_cfg = g_file_new_for_path((base + "/taskgraph/config.json").c_str());
     GFileMonitor* m_cfg = g_file_monitor_file(f_cfg, G_FILE_MONITOR_NONE, nullptr, nullptr);
     if (m_cfg) {
@@ -575,26 +556,26 @@ static void setup_file_monitors() {
             if (ev == G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT || ev == G_FILE_MONITOR_EVENT_CHANGED) {
                 load_config(true);
                 check_desktop_state();
-                wake_physics(0.4);
+                wake_all_outputs_physics(0.4);
             }
         }), nullptr);
     }
     g_object_unref(f_cfg);
 
-    // 3. Monitor /tmp/monolith_fuzzel_active so Fuzzel wakes TaskGraph even from deep sleep
+    // 3. Monitor /tmp/monolith_fuzzel_active
     GFile* f_fuz = g_file_new_for_path("/tmp/monolith_fuzzel_active");
     GFileMonitor* m_fuz = g_file_monitor_file(f_fuz, G_FILE_MONITOR_NONE, nullptr, nullptr);
     if (m_fuz) {
         g_signal_connect(m_fuz, "changed", G_CALLBACK(+[](GFileMonitor*, GFile*, GFile*, GFileMonitorEvent, gpointer) {
             ensure_physics_timer_running();
-            wake_physics(1.0);
+            wake_all_outputs_physics(1.0);
         }), nullptr);
     }
     g_object_unref(f_fuz);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ZERO-FORK HYPRLAND SYNCHRONIZATION & COVERAGE STATE
+// ZERO-FORK HYPRLAND IPC & MONITOR SYNCHRONIZATION
 // ──────────────────────────────────────────────────────────────────────────────
 static std::string format_ws_badge(int ws_id, const std::string& ws_name) {
     if (ws_name.find("spotify") != std::string::npos) return "S";
@@ -610,7 +591,6 @@ static void check_desktop_state() {
     std::unordered_map<std::string, int> mon_active_ws;
     std::unordered_map<std::string, std::string> mon_special_ws;
 
-    // 1. Query monitors & activeworkspace directly via HyprIPC socket (< 0.05ms, 0 forks)
     std::string mon_raw = HyprIPC::request("j/monitors");
     if (!mon_raw.empty()) {
         try {
@@ -643,7 +623,6 @@ static void check_desktop_state() {
         g_graph.active_ws_id = active_ws_id;
     }
 
-    // 2. Query clients directly via HyprIPC socket
     std::string clients_raw = HyprIPC::request("j/clients");
     if (clients_raw.empty()) return;
 
@@ -655,15 +634,6 @@ static void check_desktop_state() {
 
         std::unordered_map<int, int> tiled_on_ws;
         std::unordered_map<int, bool> fullscreen_on_ws;
-        int extra_ws_count = 0;
-
-        for (auto& n : g_graph.nodes) {
-            if (n.is_pinned) {
-                n.is_running = false;
-                n.hypr_address = "";
-                n.workspace_label = "";
-            }
-        }
 
         for (const auto& c : clients) {
             std::string cls = c.value("class", "");
@@ -676,178 +646,114 @@ static void check_desktop_state() {
             bool is_floating = c.value("floating", false);
             bool is_fullscreen = c.value("fullscreen", false);
 
-            if (ws_name == "special:extra") {
-                extra_ws_count++;
-            }
-
             if (is_fullscreen) fullscreen_on_ws[ws] = true;
             if (!is_floating && ws_name.rfind("special:", 0) != 0) {
                 tiled_on_ws[ws]++;
             }
 
             active_addresses.insert(addr);
+            if (ws_name != "special:ramvault") {
+                unpinned_candidates[addr] = c;
+            }
+        }
 
-            bool matched_pinned = false;
-            for (auto& n : g_graph.nodes) {
-                if (n.is_pinned && !n.match_class.empty()) {
-                    if (strcasecmp(cls.c_str(), n.match_class.c_str()) == 0 ||
-                        cls.find(n.match_class) != std::string::npos ||
-                        n.match_class.find(cls) != std::string::npos) {
-                        n.is_running = true;
-                        n.hypr_address = addr;
-                        n.workspace_id = ws;
-                        n.workspace_label = format_ws_badge(ws, ws_name);
-                        matched_pinned = true;
-                        break;
+        // Synchronize state per output window independently
+        for (auto* out : g_graph.outputs) {
+            if (!out) continue;
+            std::string mname = out->name;
+            int ws = mon_active_ws.count(mname) ? mon_active_ws[mname] : active_ws_id;
+            std::string sp = mon_special_ws.count(mname) ? mon_special_ws[mname] : "";
+
+            bool this_mon_special = (!sp.empty() && sp != "null" && sp != "special:ramvault");
+            bool this_mon_fs = fullscreen_on_ws[ws];
+            bool this_mon_tiled = (tiled_on_ws[ws] > 0);
+
+            bool covered = (this_mon_special || this_mon_fs || this_mon_tiled);
+            if (!g_graph.auto_freeze) covered = false;
+
+            if (covered != out->is_covered) {
+                out->is_covered = covered;
+                if (!out->is_covered) {
+                    wake_output_physics(out, 0.70);
+                }
+            }
+
+            // Sync pinned nodes running state
+            for (auto& n : out->nodes) {
+                if (n.is_pinned) {
+                    n.is_running = false;
+                    n.hypr_address = "";
+                    n.workspace_label = "";
+
+                    for (const auto& c : clients) {
+                        std::string cls = c.value("class", "");
+                        std::string addr = c.value("address", "");
+                        if (!n.match_class.empty() && (strcasecmp(cls.c_str(), n.match_class.c_str()) == 0 ||
+                            cls.find(n.match_class) != std::string::npos ||
+                            n.match_class.find(cls) != std::string::npos)) {
+                            n.is_running = true;
+                            n.hypr_address = addr;
+                            int cws = c.value("workspace", json::object()).value("id", 1);
+                            std::string cws_name = c.value("workspace", json::object()).value("name", "");
+                            n.workspace_id = cws;
+                            n.workspace_label = format_ws_badge(cws, cws_name);
+                            break;
+                        }
                     }
                 }
             }
 
-            if (!matched_pinned) {
-                // Never create dynamic unpinned nodes for hidden RAM Vault windows
-                if (ws_name != "special:ramvault") {
-                    unpinned_candidates[addr] = c;
+            // Remove closed unpinned nodes
+            size_t prev_count = out->nodes.size();
+            out->nodes.erase(
+                std::remove_if(out->nodes.begin(), out->nodes.end(), [&](const AppNode& n) {
+                    if (n.is_pinned) return false;
+                    return active_addresses.find(n.hypr_address) == active_addresses.end();
+                }),
+                out->nodes.end()
+            );
+            bool topo_changed = (out->nodes.size() != prev_count);
+
+            // Update existing unpinned nodes
+            for (auto& n : out->nodes) {
+                if (!n.is_pinned) {
+                    auto it = unpinned_candidates.find(n.hypr_address);
+                    if (it != unpinned_candidates.end()) {
+                        int cws = it->second.value("workspace", json::object()).value("id", 1);
+                        std::string cws_name = it->second.value("workspace", json::object()).value("name", "");
+                        n.workspace_id = cws;
+                        n.workspace_label = format_ws_badge(cws, cws_name);
+                    }
                 }
             }
-        }
 
-        // Intelligent Multi-Monitor Desktop Coverage Determination
-        bool all_outputs_covered = true;
-        if (g_graph.auto_freeze && !g_graph.outputs.empty()) {
-            for (auto* out : g_graph.outputs) {
-                if (!out) continue;
-                std::string mname = out->name;
-                int ws = mon_active_ws.count(mname) ? mon_active_ws[mname] : active_ws_id;
-                std::string sp = mon_special_ws.count(mname) ? mon_special_ws[mname] : "";
-
-                bool this_mon_special = (!sp.empty() && sp != "null" && sp != "special:ramvault");
-                bool this_mon_fs = fullscreen_on_ws[ws];
-                bool this_mon_tiled = (tiled_on_ws[ws] > 0);
-
-                if (!this_mon_special && !this_mon_fs && !this_mon_tiled) {
-                    all_outputs_covered = false; // At least one screen showing the graph is uncovered!
-                    break;
+            // Clean dangling edges
+            std::vector<AppEdge> clean_edges;
+            for (const auto& e : out->edges) {
+                bool has_from = false, has_to = false;
+                for (const auto& n : out->nodes) {
+                    if (n.id == e.from_id) has_from = true;
+                    if (n.id == e.to_id) has_to = true;
                 }
-            }
-        } else {
-            all_outputs_covered = false;
-        }
+                if (!has_from || !has_to || e.from_id == e.to_id) continue;
 
-        bool newly_covered = all_outputs_covered;
-        if (newly_covered != g_graph.is_covered) {
-            g_graph.is_covered = newly_covered;
-            if (!g_graph.is_covered) {
-                wake_physics(0.70);
-            }
-        }
-
-        bool topology_changed = false;
-
-        // Remove closed dynamic windows
-        size_t prev_count = g_graph.nodes.size();
-        g_graph.nodes.erase(
-            std::remove_if(g_graph.nodes.begin(), g_graph.nodes.end(), [&](const AppNode& n) {
-                if (n.is_pinned) return false;
-                return active_addresses.find(n.hypr_address) == active_addresses.end();
-            }),
-            g_graph.nodes.end()
-        );
-        if (g_graph.nodes.size() != prev_count) topology_changed = true;
-
-        for (auto& n : g_graph.nodes) {
-            if (!n.is_pinned) {
-                auto it = unpinned_candidates.find(n.hypr_address);
-                if (it != unpinned_candidates.end()) {
-                    int ws = it->second.value("workspace", json::object()).value("id", 1);
-                    std::string ws_name = it->second.value("workspace", json::object()).value("name", "");
-                    n.workspace_id = ws;
-                    n.workspace_label = format_ws_badge(ws, ws_name);
-                    unpinned_candidates.erase(it);
+                bool dup = false;
+                for (const auto& u : clean_edges) {
+                    if ((u.from_id == e.from_id && u.to_id == e.to_id) ||
+                        (u.from_id == e.to_id && u.to_id == e.from_id)) {
+                        dup = true;
+                        break;
+                    }
                 }
+                if (!dup) clean_edges.push_back(e);
             }
-        }
+            out->edges = std::move(clean_edges);
 
-        // Add brand new dynamic windows
-        for (const auto& [addr, c] : unpinned_candidates) {
-            std::string cls = c.value("class", "");
-            std::string title = c.value("title", "");
-            int ws = c.value("workspace", json::object()).value("id", 1);
-            std::string ws_name = c.value("workspace", json::object()).value("name", "");
-
-            AppNode dn;
-            dn.id = "win_" + addr;
-            dn.name = cls.empty() ? title : cls;
-            if (dn.name.length() > 14) dn.name = dn.name.substr(0, 12) + "..";
-
-            std::string icon_lookup = cls;
-            std::transform(icon_lookup.begin(), icon_lookup.end(), icon_lookup.begin(), ::tolower);
-            dn.icon_name = icon_lookup;
-            dn.exec_cmd = cls;
-            dn.match_class = cls;
-            dn.hypr_address = addr;
-            dn.workspace_id = ws;
-            dn.workspace_label = format_ws_badge(ws, ws_name);
-            dn.is_pinned = false;
-            dn.is_running = true;
-            dn.radius = g_graph.node_radius;
-            dn.drift_phase = (rand() % 628) / 100.0;
-            dn.drift_speed = 0.22;
-
-            if (!g_graph.nodes.empty()) {
-                const auto& ref = g_graph.nodes[rand() % g_graph.nodes.size()];
-                double ang = (rand() % 360) * M_PI / 180.0;
-                dn.x = std::clamp(ref.x + 210.0 * std::cos(ang), 120.0, g_graph.screen_w - 120.0);
-                dn.y = std::clamp(ref.y + 210.0 * std::sin(ang), 120.0, g_graph.screen_h - 120.0);
-            } else {
-                dn.x = g_graph.screen_w * 0.5;
-                dn.y = g_graph.screen_h * 0.5;
+            if (topo_changed) {
+                wake_output_physics(out, 0.65);
+            } else if (!out->is_covered && out->da) {
+                gtk_widget_queue_draw(out->da);
             }
-            dn.pixbuf = get_icon_pixbuf(dn.icon_name, 22);
-
-            g_graph.nodes.push_back(dn);
-
-            int closest_idx = -1;
-            double min_dist = 1e9;
-            for (size_t i = 0; i < g_graph.nodes.size() - 1; ++i) {
-                if (!g_graph.nodes[i].is_pinned) continue;
-                double d = std::hypot(dn.x - g_graph.nodes[i].x, dn.y - g_graph.nodes[i].y);
-                if (d < min_dist) {
-                    min_dist = d;
-                    closest_idx = static_cast<int>(i);
-                }
-            }
-            if (closest_idx >= 0) {
-                g_graph.edges.push_back({dn.id, g_graph.nodes[closest_idx].id, 240.0});
-            }
-            topology_changed = true;
-        }
-
-        // Clean dangling edges
-        std::vector<AppEdge> clean_edges;
-        for (const auto& e : g_graph.edges) {
-            bool has_from = false, has_to = false;
-            for (const auto& n : g_graph.nodes) {
-                if (n.id == e.from_id) has_from = true;
-                if (n.id == e.to_id) has_to = true;
-            }
-            if (!has_from || !has_to || e.from_id == e.to_id) continue;
-
-            bool dup = false;
-            for (const auto& u : clean_edges) {
-                if ((u.from_id == e.from_id && u.to_id == e.to_id) ||
-                    (u.from_id == e.to_id && u.to_id == e.from_id)) {
-                    dup = true;
-                    break;
-                }
-            }
-            if (!dup) clean_edges.push_back(e);
-        }
-        g_graph.edges = std::move(clean_edges);
-
-        if (topology_changed) {
-            wake_physics(0.65);
-        } else if (!g_graph.is_covered) {
-            queue_all_outputs_redraw();
         }
     } catch (...) {}
 }
@@ -890,8 +796,7 @@ static void hypr_socket_listener_thread() {
                 HyprIPC::dispatch("togglespecialworkspace ramvault");
             }
 
-            // When switching regular virtual workspaces (1..9), automatically close any open special overlay
-            // so windows in special:extra or special:spotify never stay stuck in front of the user!
+            // Close special workspaces when switching virtual workspaces
             if (std::strstr(buf, "workspace>>")) {
                 std::string mraw = HyprIPC::request("j/monitors");
                 if (!mraw.empty()) {
@@ -913,13 +818,13 @@ static void hypr_socket_listener_thread() {
                 }
             }
 
-            // If a window was closed with X button, re-warm any load_to_ram app after 1.8s
+            // If a window was closed, re-warm any load_to_ram app after 1.8s
             if (std::strstr(buf, "closewindow>>")) {
                 g_timeout_add(1800, +[](gpointer) -> gboolean {
                     check_desktop_state();
-                    for (const auto& n : g_graph.nodes) {
-                        if (n.is_pinned && n.load_to_ram && !n.is_running) {
-                            exec_bg("/usr/local/bin/monolith-ram-preloader warm \"" + n.id + "\"");
+                    for (const auto& tmpl : g_graph.pinned_templates) {
+                        if (tmpl.load_to_ram) {
+                            exec_bg("/usr/local/bin/monolith-ram-preloader warm \"" + tmpl.id + "\"");
                         }
                     }
                     return G_SOURCE_REMOVE;
@@ -946,13 +851,26 @@ static void hypr_socket_listener_thread() {
 }
 
 static void check_fuzzel_state() {
-    bool fuzzel_now = (access("/tmp/monolith_fuzzel_active", F_OK) == 0);
-    if (fuzzel_now != g_graph.fuzzel_active) {
-        if (!fuzzel_now && g_graph.fuzzel_active) {
-            g_graph.return_timer = 1.0;
+    std::string target_mon = "";
+    bool fuzzel_file_exists = (access("/tmp/monolith_fuzzel_active", F_OK) == 0);
+    if (fuzzel_file_exists) {
+        std::ifstream f("/tmp/monolith_fuzzel_active");
+        if (f.is_open()) {
+            f >> target_mon;
         }
-        g_graph.fuzzel_active = fuzzel_now;
-        wake_physics(1.0);
+        if (target_mon.empty()) target_mon = "all";
+    }
+
+    for (auto* out : g_graph.outputs) {
+        if (!out) continue;
+        bool should_fuz = fuzzel_file_exists && (target_mon == "all" || target_mon == out->name);
+        if (should_fuz != out->fuzzel_active) {
+            if (!should_fuz && out->fuzzel_active) {
+                out->return_timer = 1.0;
+            }
+            out->fuzzel_active = should_fuz;
+            wake_output_physics(out, 1.0);
+        }
     }
 }
 
@@ -982,55 +900,57 @@ static void check_popup_state() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// PHYSICS ENGINE (Force-Directed Constellation with Critical Damping & Orbit)
+// PER-OUTPUT PHYSICS ENGINE (1:1 Native Resolution Space)
 // ──────────────────────────────────────────────────────────────────────────────
-static void update_physics() {
+static void update_physics_for_output(OutputWindow* out) {
+    if (!out) return;
+
     if (g_popup_rep.active) {
         g_popup_rep.smooth_weight += (1.0 - g_popup_rep.smooth_weight) * 0.22;
-        wake_physics(1.0);
+        wake_output_physics(out, 1.0);
     } else {
         g_popup_rep.smooth_weight *= 0.84;
     }
 
-    if (g_graph.is_covered && !g_graph.fuzzel_active && g_popup_rep.smooth_weight < 0.01 && g_graph.return_timer <= 0.0) {
+    if (out->is_covered && !out->fuzzel_active && g_popup_rep.smooth_weight < 0.01 && out->return_timer <= 0.0) {
         return;
     }
 
-    if (g_graph.return_timer > 0.0) {
-        g_graph.return_timer = std::max(0.0, g_graph.return_timer - 0.04);
+    if (out->return_timer > 0.0) {
+        out->return_timer = std::max(0.0, out->return_timer - 0.04);
     }
 
-    bool is_returning = (g_graph.return_timer > 0.001);
+    bool is_returning = (out->return_timer > 0.001);
 
-    if (g_graph.alpha < 0.20) {
-        g_graph.alpha = 0.20;
+    if (out->alpha < 0.20) {
+        out->alpha = 0.20;
     }
-    g_graph.physics_active = true;
+    out->physics_active = true;
 
-    size_t n = g_graph.nodes.size();
+    size_t n = out->nodes.size();
     if (n == 0) return;
 
-    g_graph.sim_time += 0.014;
+    out->sim_time += 0.014;
 
-    double fcx = g_graph.screen_w / 2.0;
-    double fcy = g_graph.screen_h / 2.0;
+    double fcx = out->width / 2.0;
+    double fcy = out->height / 2.0;
 
-    double effective_damping = g_graph.fuzzel_active ? 0.77 : (is_returning ? 0.81 : g_graph.damping);
-    double spring_mult = g_graph.fuzzel_active ? 0.18 : (1.0 + 1.8 * g_graph.return_timer);
-    double grav_mult = g_graph.fuzzel_active ? 0.12 : (1.0 + 3.8 * g_graph.return_timer);
+    double effective_damping = out->fuzzel_active ? 0.77 : (is_returning ? 0.81 : g_graph.damping);
+    double spring_mult = out->fuzzel_active ? 0.18 : (1.0 + 1.8 * out->return_timer);
+    double grav_mult = out->fuzzel_active ? 0.12 : (1.0 + 3.8 * out->return_timer);
 
     for (size_t i = 0; i < n; ++i) {
-        auto& node = g_graph.nodes[i];
+        auto& node = out->nodes[i];
         if (node.is_dragged) continue;
 
-        double t = g_graph.sim_time;
+        double t = out->sim_time;
         double fx = 0.18 * std::sin(node.drift_phase + t * node.drift_speed)
                   + 0.10 * std::cos(node.drift_phase * 1.73 + t * (node.drift_speed * 0.7));
         double fy = 0.18 * std::cos(node.drift_phase * 1.41 + t * (node.drift_speed * 0.85))
                   + 0.10 * std::sin(node.drift_phase * 2.19 + t * (node.drift_speed * 0.6));
 
-        // 1. Fuzzel App Menu Smoothstep Repulsion Field
-        if (g_graph.fuzzel_active) {
+        // 1. Fuzzel App Menu Smoothstep Repulsion Field (Isolated to this monitor)
+        if (out->fuzzel_active) {
             double fdx = node.x - fcx;
             double fdy = node.y - fcy;
             double rx = g_graph.repulsion_radius * 0.70;
@@ -1063,10 +983,10 @@ static void update_physics() {
                 if (dy < 0) dy = std::abs(dy) + 50.0;
 
                 double d = std::hypot(dx, dy) + 0.1;
-                double rx = (g_popup_rep.w / 2.0) + pad;
-                double ry = (g_popup_rep.h / 2.0) + pad;
-                double pen_x = std::clamp((rx - std::abs(node.x - pcx)) / rx, 0.0, 1.0);
-                double pen_y = std::clamp((ry - std::abs(node.y - pcy)) / ry, 0.0, 1.0);
+                double prx = (g_popup_rep.w / 2.0) + pad;
+                double pry = (g_popup_rep.h / 2.0) + pad;
+                double pen_x = std::clamp((prx - std::abs(node.x - pcx)) / prx, 0.0, 1.0);
+                double pen_y = std::clamp((pry - std::abs(node.y - pcy)) / pry, 0.0, 1.0);
                 double pen = std::max(pen_x, pen_y);
 
                 double push = pen * pen * (3.0 - 2.0 * pen) * 24.0 * g_popup_rep.smooth_weight;
@@ -1082,8 +1002,8 @@ static void update_physics() {
         // 3. Mutual Node Repulsion + Personal Bubble
         for (size_t j = 0; j < n; ++j) {
             if (i == j) continue;
-            double dx = node.x - g_graph.nodes[j].x;
-            double dy = node.y - g_graph.nodes[j].y;
+            double dx = node.x - out->nodes[j].x;
+            double dy = node.y - out->nodes[j].y;
             double d = std::hypot(dx, dy) + 0.001;
 
             if (d < 750.0) {
@@ -1102,13 +1022,13 @@ static void update_physics() {
         }
 
         // 4. Elastic Springs with Dashpot Damping
-        for (const auto& e : g_graph.edges) {
+        for (const auto& e : out->edges) {
             std::string other_id;
             if (e.from_id == node.id) other_id = e.to_id;
             else if (e.to_id == node.id) other_id = e.from_id;
 
             if (!other_id.empty()) {
-                for (const auto& other : g_graph.nodes) {
+                for (const auto& other : out->nodes) {
                     if (other.id == other_id) {
                         double dx = other.x - node.x;
                         double dy = other.y - node.y;
@@ -1129,7 +1049,7 @@ static void update_physics() {
             }
         }
 
-        // 5. Screen Boundary Aerodynamic Cushion Force Field
+        // 5. Screen Boundary Cushion Field
         double pad_x = node.radius + 36.0;
         double pad_y_top = node.radius + 50.0;
         double pad_y_bot = node.radius + 38.0;
@@ -1144,7 +1064,7 @@ static void update_physics() {
             if (node.vx < 0.0) node.vx *= (1.0 - 0.44 * u);
         }
 
-        double dist_right = (g_graph.screen_w - pad_x) - node.x;
+        double dist_right = (out->width - pad_x) - node.x;
         if (dist_right < margin_x) {
             double u = std::clamp((margin_x - dist_right) / margin_x, 0.0, 1.0);
             fx -= u * u * 5.0;
@@ -1158,7 +1078,7 @@ static void update_physics() {
             if (node.vy < 0.0) node.vy *= (1.0 - 0.44 * u);
         }
 
-        double dist_bot = (g_graph.screen_h - pad_y_bot) - node.y;
+        double dist_bot = (out->height - pad_y_bot) - node.y;
         if (dist_bot < margin_y) {
             double u = std::clamp((margin_y - dist_bot) / margin_y, 0.0, 1.0);
             fy -= u * u * 5.0;
@@ -1166,11 +1086,11 @@ static void update_physics() {
         }
 
         // 6. Velocity Integration
-        node.vx = (node.vx + fx * g_graph.alpha) * effective_damping;
-        node.vy = (node.vy + fy * g_graph.alpha) * effective_damping;
+        node.vx = (node.vx + fx * out->alpha) * effective_damping;
+        node.vy = (node.vy + fy * out->alpha) * effective_damping;
 
-        // 7. Subtle 16-second Orbital Rotation when Fuzzel Menu is Open
-        if (g_graph.fuzzel_active) {
+        // 7. Subtle 16-second Orbital Rotation when Fuzzel is Open
+        if (out->fuzzel_active) {
             double fdx = node.x - fcx;
             double fdy = node.y - fcy;
             double rx = g_graph.repulsion_radius * 0.70;
@@ -1184,29 +1104,29 @@ static void update_physics() {
             node.vy += (target_vy - node.vy) * 0.08;
         }
 
-        double max_speed = g_graph.fuzzel_active ? 6.2 : (is_returning ? (1.3 + 4.2 * g_graph.return_timer) : 1.3);
+        double max_speed = out->fuzzel_active ? 6.2 : (is_returning ? (1.3 + 4.2 * out->return_timer) : 1.3);
         node.vx = std::clamp(node.vx, -max_speed, max_speed);
         node.vy = std::clamp(node.vy, -max_speed, max_speed);
 
         node.x += node.vx;
         node.y += node.vy;
 
-        node.x = std::clamp(node.x, pad_x, g_graph.screen_w - pad_x);
-        node.y = std::clamp(node.y, pad_y_top, g_graph.screen_h - pad_y_bot);
+        node.x = std::clamp(node.x, pad_x, out->width - pad_x);
+        node.y = std::clamp(node.y, pad_y_top, out->height - pad_y_bot);
     }
 
-    if (!g_graph.fuzzel_active && !is_returning) {
-        g_graph.alpha = std::max(0.20, g_graph.alpha * 0.96);
+    if (!out->fuzzel_active && !is_returning) {
+        out->alpha = std::max(0.20, out->alpha * 0.96);
     }
 
-    for (auto& node : g_graph.nodes) {
+    for (auto& node : out->nodes) {
         double target_scale = node.is_hovered ? 1.16 : 1.0;
         node.cur_scale += (target_scale - node.cur_scale) * 0.24;
     }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ARCHITECTURAL RENDERING ENGINE
+// ARCHITECTURAL RENDERING ENGINE (1:1 Native Resolution Cairo Canvas)
 // ──────────────────────────────────────────────────────────────────────────────
 static void draw_rounded_rect(cairo_t* cr, double x, double y, double w, double h, double r) {
     cairo_new_path(cr);
@@ -1220,20 +1140,20 @@ static void draw_rounded_rect(cairo_t* cr, double x, double y, double w, double 
 
 static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpointer user_data) {
     OutputWindow* out = static_cast<OutputWindow*>(user_data);
-    if (out) {
-        if (width != out->width || height != out->height) {
-            out->width = width;
-            out->height = height;
-            rebuild_output_bg(out);
-        }
+    if (!out) return;
+
+    if (width != out->width || height != out->height) {
+        out->width = width;
+        out->height = height;
+        rebuild_output_bg(out);
+        init_output_nodes(out, true);
     }
 
     // ──────────────── 0. UNIFIED PROCEDURAL GRADIENT + GRAIN BASE ────────────
-    cairo_surface_t* bg = (out && out->bg_surface) ? out->bg_surface : g_graph.bg_surface;
-    if (bg) {
+    if (out->bg_surface) {
         cairo_save(cr);
         cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
-        cairo_set_source_surface(cr, bg, 0, 0);
+        cairo_set_source_surface(cr, out->bg_surface, 0, 0);
         cairo_paint(cr);
         cairo_restore(cr);
     } else {
@@ -1241,20 +1161,14 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         cairo_paint(cr);
     }
 
-    double scale_x = (g_graph.screen_w > 0) ? ((double)width / (double)g_graph.screen_w) : 1.0;
-    double scale_y = (g_graph.screen_h > 0) ? ((double)height / (double)g_graph.screen_h) : 1.0;
-
-    cairo_save(cr);
-    cairo_scale(cr, scale_x, scale_y);
-
+    // ──────────────── 1. CONSTELLATION EDGES (NATIVE PIXEL SPACE) ────────────
     std::unordered_map<std::string, const AppNode*> id_map;
-    for (const auto& n : g_graph.nodes) id_map[n.id] = &n;
+    for (const auto& n : out->nodes) id_map[n.id] = &n;
 
-    // ──────────────── 1. CONSTELLATION EDGES (CLIPPED AT NODE RIMS) ──────────
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-    double pulse_phase = std::fmod(g_graph.sim_time * 0.65, 1.0);
+    double pulse_phase = std::fmod(out->sim_time * 0.65, 1.0);
 
-    for (const auto& e : g_graph.edges) {
+    for (const auto& e : out->edges) {
         auto it1 = id_map.find(e.from_id);
         auto it2 = id_map.find(e.to_id);
         if (it1 == id_map.end() || it2 == id_map.end()) continue;
@@ -1296,7 +1210,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         cairo_line_to(cr, ex, ey);
         cairo_stroke(cr);
 
-        // Subtle telemetry signal pulse traveling along active/hovered edges
+        // Subtle telemetry pulse
         if (is_highlighted || both_running) {
             double px = sx + (ex - sx) * pulse_phase;
             double py = sy + (ey - sy) * pulse_phase;
@@ -1310,7 +1224,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
     // ──────────────── 2. OBSIDIAN NODE DISCS, HALOS, ICONS & BADGES ──────────
     cairo_select_font_face(cr, "JetBrains Mono", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
 
-    for (const auto& node : g_graph.nodes) {
+    for (const auto& node : out->nodes) {
         double r = node.radius * node.cur_scale;
         cairo_new_path(cr);
 
@@ -1335,7 +1249,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
             cairo_stroke(cr);
         }
 
-        // Obsidian core disc (#07070a) so icons pop with razor-sharp contrast
+        // Obsidian core disc
         cairo_new_sub_path(cr);
         cairo_arc(cr, node.x, node.y, r, 0, 2 * M_PI);
         if (node.is_hovered || node.is_dragged) {
@@ -1347,7 +1261,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         }
         cairo_fill_preserve(cr);
 
-        // Precision architectural perimeter rim
+        // Precision perimeter rim
         if (node.is_hovered || node.is_dragged) {
             cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
             cairo_set_line_width(cr, 1.7);
@@ -1360,7 +1274,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         }
         cairo_stroke(cr);
 
-        // Application Icon (cleanly centered, never obstructed!)
+        // Centered Application Icon
         if (node.pixbuf) {
             int icon_w = gdk_pixbuf_get_width(node.pixbuf);
             int icon_h = gdk_pixbuf_get_height(node.pixbuf);
@@ -1393,7 +1307,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
             cairo_fill(cr);
         }
 
-        // Top-Left Badge: Workspace Indicator for Running Apps (W1..W9, S, E)
+        // Top-Left Badge: Workspace Indicator (W1..W9, S, E)
         if (node.is_running && !node.workspace_label.empty()) {
             cairo_set_font_size(cr, 8.0);
             cairo_text_extents_t wext;
@@ -1457,19 +1371,19 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         cairo_new_path(cr);
     }
 
-    // ──────────────── 3. 5-ACTION ARCHITECTURAL OLED CONTEXT MENU ────────────
-    if (g_graph.menu_open && g_graph.menu_node_idx >= 0 && g_graph.menu_node_idx < static_cast<int>(g_graph.nodes.size())) {
-        const auto& node = g_graph.nodes[g_graph.menu_node_idx];
+    // ──────────────── 3. CONTEXT MENU (LOCALIZED TO THIS OUTPUT) ─────────────
+    if (out->menu_open && out->menu_node_idx >= 0 && out->menu_node_idx < static_cast<int>(out->nodes.size())) {
+        const auto& node = out->nodes[out->menu_node_idx];
 
         int num_items = node.is_running ? 5 : 4;
         double item_h = 30.0;
         double menu_h = 44.0 + num_items * (item_h + 2.0) + 6.0;
-        g_graph.menu_h = menu_h;
+        out->menu_h = menu_h;
 
-        double mx = std::clamp(g_graph.menu_x, 15.0, g_graph.screen_w - g_graph.menu_w - 15.0);
-        double my = std::clamp(g_graph.menu_y, 42.0, g_graph.screen_h - menu_h - 15.0);
+        double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
+        double my = std::clamp(out->menu_y, 42.0, out->height - menu_h - 15.0);
 
-        draw_rounded_rect(cr, mx, my, g_graph.menu_w, menu_h, 8.0);
+        draw_rounded_rect(cr, mx, my, out->menu_w, menu_h, 8.0);
         cairo_set_source_rgba(cr, 0.03, 0.03, 0.04, 0.98);
         cairo_fill_preserve(cr);
         cairo_set_source_rgba(cr, 0.28, 0.28, 0.34, 0.95);
@@ -1487,7 +1401,7 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
         cairo_set_source_rgba(cr, 0.18, 0.18, 0.22, 0.90);
         cairo_set_line_width(cr, 1.0);
         cairo_move_to(cr, mx + 10.0, my + 34.0);
-        cairo_line_to(cr, mx + g_graph.menu_w - 10.0, my + 34.0);
+        cairo_line_to(cr, mx + out->menu_w - 10.0, my + 34.0);
         cairo_stroke(cr);
 
         double start_y = my + 40.0;
@@ -1495,8 +1409,8 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
 
         auto draw_menu_row = [&](int idx, const std::string& label, double r_col, double g_col, double b_col) {
             double ry = start_y + idx * (item_h + 2.0);
-            if (g_graph.menu_hovered_item == idx) {
-                draw_rounded_rect(cr, mx + 6.0, ry, g_graph.menu_w - 12.0, item_h, 5.0);
+            if (out->menu_hovered_item == idx) {
+                draw_rounded_rect(cr, mx + 6.0, ry, out->menu_w - 12.0, item_h, 5.0);
                 cairo_set_source_rgba(cr, 0.16, 0.16, 0.20, 0.95);
                 cairo_fill(cr);
             }
@@ -1505,11 +1419,9 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
             cairo_show_text(cr, label.c_str());
         };
 
-        // Item 0: Focus or Launch
         std::string item0_lbl = (node.workspace_label == "V") ? "⚡  Instant Launch (RAM Vault)" : (node.is_running ? "▶  Focus Window" : "▶  Launch Application");
         draw_menu_row(0, item0_lbl, 1.0, 1.0, 1.0);
 
-        // Item 1: Stash to Extra Shelf (if running) or Launch New Instance
         if (node.is_running) {
             bool in_extra = (node.workspace_label == "E");
             draw_menu_row(1, in_extra ? "▲  Restore from Extra Shelf" : "▼  Stash to Extra Shelf", 0.96, 0.72, 0.25);
@@ -1517,31 +1429,27 @@ static void draw_graph(GtkDrawingArea*, cairo_t* cr, int width, int height, gpoi
             draw_menu_row(1, "+  Launch Fresh Instance", 0.82, 0.82, 0.86);
         }
 
-        // Item 2: Pin / Unpin
         draw_menu_row(2, node.is_pinned ? "✕  Unpin from Constellation" : "★  Pin to Constellation", 0.88, 0.88, 0.92);
 
-        // Item 3: Load to RAM
         if (node.load_to_ram) {
             draw_menu_row(3, "●  RAM Cache: [ RESIDENT ]", 0.29, 0.87, 0.50);
         } else {
             draw_menu_row(3, "○  Load to RAM: [ DISABLED ]", 0.65, 0.65, 0.70);
         }
 
-        // Item 4: Close Window (only when running)
         if (node.is_running) {
             draw_menu_row(4, "■  Close Running Window", 0.97, 0.44, 0.44);
         }
     }
-
-    cairo_restore(cr);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// MOUSE INTERACTION & GESTURES
+// MOUSE INTERACTION & HIT TESTING
 // ──────────────────────────────────────────────────────────────────────────────
-static int hit_test_node(double x, double y) {
-    for (int i = static_cast<int>(g_graph.nodes.size()) - 1; i >= 0; --i) {
-        const auto& n = g_graph.nodes[i];
+static int hit_test_node(OutputWindow* out, double x, double y) {
+    if (!out) return -1;
+    for (int i = static_cast<int>(out->nodes.size()) - 1; i >= 0; --i) {
+        const auto& n = out->nodes[i];
         double dx = x - n.x;
         double dy = y - n.y;
         double hit_r = n.radius * n.cur_scale + 6.0;
@@ -1555,7 +1463,6 @@ static int hit_test_node(double x, double y) {
 static void focus_or_launch_node(const AppNode& node) {
     if (node.is_running && !node.hypr_address.empty()) {
         if (node.workspace_label == "V" || node.workspace_label == "E") {
-            // Instant <1ms summon from Warm RAM Vault or Extra Shelf onto current regular workspace!
             std::string target_ws = std::to_string(std::max(1, g_graph.active_ws_id));
             HyprIPC::batch({
                 "dispatch movetoworkspace " + target_ws + ",address:" + node.hypr_address,
@@ -1575,23 +1482,19 @@ static void focus_or_launch_node(const AppNode& node) {
 
 static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpointer user_data) {
     OutputWindow* out = static_cast<OutputWindow*>(user_data);
-    g_graph.is_covered = false;
+    if (!out) return;
+    out->is_covered = false;
     ensure_physics_timer_running();
 
-    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
-    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
-    double rx = start_x * sx;
-    double ry = start_y * sy;
+    out->dragged_node_idx = -1;
 
-    g_graph.dragged_node_idx = -1;
+    if (out->menu_open && out->menu_node_idx >= 0 && out->menu_node_idx < static_cast<int>(out->nodes.size())) {
+        double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
+        double my = std::clamp(out->menu_y, 42.0, out->height - out->menu_h - 15.0);
 
-    if (g_graph.menu_open && g_graph.menu_node_idx >= 0 && g_graph.menu_node_idx < static_cast<int>(g_graph.nodes.size())) {
-        double mx = std::clamp(g_graph.menu_x, 15.0, g_graph.screen_w - g_graph.menu_w - 15.0);
-        double my = std::clamp(g_graph.menu_y, 42.0, g_graph.screen_h - g_graph.menu_h - 15.0);
-
-        if (rx >= mx && rx <= mx + g_graph.menu_w && ry >= my + 40.0 && ry <= my + g_graph.menu_h) {
-            int clicked_item = static_cast<int>((ry - (my + 40.0)) / 32.0);
-            auto& target_node = g_graph.nodes[g_graph.menu_node_idx];
+        if (start_x >= mx && start_x <= mx + out->menu_w && start_y >= my + 40.0 && start_y <= my + out->menu_h) {
+            int clicked_item = static_cast<int>((start_y - (my + 40.0)) / 32.0);
+            auto& target_node = out->nodes[out->menu_node_idx];
 
             if (clicked_item == 0) {
                 focus_or_launch_node(target_node);
@@ -1625,98 +1528,92 @@ static void on_drag_begin(GtkGestureDrag*, double start_x, double start_y, gpoin
                 HyprIPC::dispatch("closewindow address:" + target_node.hypr_address);
             }
 
-            g_graph.menu_open = false;
-            g_graph.menu_node_idx = -1;
-            queue_all_outputs_redraw();
+            out->menu_open = false;
+            out->menu_node_idx = -1;
+            if (out->da) gtk_widget_queue_draw(out->da);
             return;
         } else {
-            g_graph.menu_open = false;
-            g_graph.menu_node_idx = -1;
-            queue_all_outputs_redraw();
+            out->menu_open = false;
+            out->menu_node_idx = -1;
+            if (out->da) gtk_widget_queue_draw(out->da);
             return;
         }
     }
 
-    int idx = hit_test_node(rx, ry);
-    g_graph.dragged_node_idx = idx;
-    g_graph.drag_start_x = rx;
-    g_graph.drag_start_y = ry;
-    g_graph.drag_dist = 0.0;
+    int idx = hit_test_node(out, start_x, start_y);
+    out->dragged_node_idx = idx;
+    out->drag_start_x = start_x;
+    out->drag_start_y = start_y;
+    out->drag_dist = 0.0;
 
     if (idx >= 0) {
-        g_graph.nodes[idx].is_dragged = true;
-        g_graph.nodes[idx].vx = 0.0;
-        g_graph.nodes[idx].vy = 0.0;
-        wake_physics(0.6);
+        out->nodes[idx].is_dragged = true;
+        out->nodes[idx].vx = 0.0;
+        out->nodes[idx].vy = 0.0;
+        wake_output_physics(out, 0.6);
     }
 }
 
 static void on_drag_update(GtkGestureDrag*, double offset_x, double offset_y, gpointer user_data) {
     OutputWindow* out = static_cast<OutputWindow*>(user_data);
-    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
-    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
+    if (!out) return;
 
-    if (g_graph.dragged_node_idx >= 0 && g_graph.dragged_node_idx < static_cast<int>(g_graph.nodes.size())) {
-        auto& node = g_graph.nodes[g_graph.dragged_node_idx];
-        node.x = g_graph.drag_start_x + offset_x * sx;
-        node.y = g_graph.drag_start_y + offset_y * sy;
-        g_graph.drag_dist = std::hypot(offset_x * sx, offset_y * sy);
-        wake_physics(0.45);
+    if (out->dragged_node_idx >= 0 && out->dragged_node_idx < static_cast<int>(out->nodes.size())) {
+        auto& node = out->nodes[out->dragged_node_idx];
+        node.x = out->drag_start_x + offset_x;
+        node.y = out->drag_start_y + offset_y;
+        out->drag_dist = std::hypot(offset_x, offset_y);
+        wake_output_physics(out, 0.45);
     }
 }
 
-static void on_drag_end(GtkGestureDrag*, double, double, gpointer) {
-    if (g_graph.dragged_node_idx >= 0 && g_graph.dragged_node_idx < static_cast<int>(g_graph.nodes.size())) {
-        auto& node = g_graph.nodes[g_graph.dragged_node_idx];
+static void on_drag_end(GtkGestureDrag*, double, double, gpointer user_data) {
+    OutputWindow* out = static_cast<OutputWindow*>(user_data);
+    if (!out) return;
+
+    if (out->dragged_node_idx >= 0 && out->dragged_node_idx < static_cast<int>(out->nodes.size())) {
+        auto& node = out->nodes[out->dragged_node_idx];
         node.is_dragged = false;
 
-        if (g_graph.drag_dist < 6.0) {
+        if (out->drag_dist < 6.0) {
             focus_or_launch_node(node);
         }
     }
 
-    g_graph.dragged_node_idx = -1;
-    wake_physics(0.5);
+    out->dragged_node_idx = -1;
+    wake_output_physics(out, 0.5);
 }
 
 static void on_right_click(GtkGestureClick*, int, double x, double y, gpointer user_data) {
     OutputWindow* out = static_cast<OutputWindow*>(user_data);
-    g_graph.is_covered = false;
+    if (!out) return;
+    out->is_covered = false;
     ensure_physics_timer_running();
 
-    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
-    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
-    double rx = x * sx;
-    double ry = y * sy;
-
-    int idx = hit_test_node(rx, ry);
+    int idx = hit_test_node(out, x, y);
     if (idx >= 0) {
-        g_graph.menu_open = true;
-        g_graph.menu_node_idx = idx;
-        g_graph.menu_x = rx + 12.0;
-        g_graph.menu_y = ry + 12.0;
-        g_graph.menu_hovered_item = -1;
-        queue_all_outputs_redraw();
-    } else if (g_graph.menu_open) {
-        g_graph.menu_open = false;
-        g_graph.menu_node_idx = -1;
-        queue_all_outputs_redraw();
+        out->menu_open = true;
+        out->menu_node_idx = idx;
+        out->menu_x = x + 12.0;
+        out->menu_y = y + 12.0;
+        out->menu_hovered_item = -1;
+        if (out->da) gtk_widget_queue_draw(out->da);
+    } else if (out->menu_open) {
+        out->menu_open = false;
+        out->menu_node_idx = -1;
+        if (out->da) gtk_widget_queue_draw(out->da);
     }
 }
 
 static void on_middle_click(GtkGestureClick*, int, double x, double y, gpointer user_data) {
     OutputWindow* out = static_cast<OutputWindow*>(user_data);
-    g_graph.is_covered = false;
+    if (!out) return;
+    out->is_covered = false;
     ensure_physics_timer_running();
 
-    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
-    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
-    double rx = x * sx;
-    double ry = y * sy;
-
-    int idx = hit_test_node(rx, ry);
-    if (idx >= 0 && g_graph.nodes[idx].is_running && !g_graph.nodes[idx].hypr_address.empty()) {
-        auto& n = g_graph.nodes[idx];
+    int idx = hit_test_node(out, x, y);
+    if (idx >= 0 && out->nodes[idx].is_running && !out->nodes[idx].hypr_address.empty()) {
+        auto& n = out->nodes[idx];
         if (n.workspace_label == "E") {
             std::string target_ws = std::to_string(std::max(1, g_graph.active_ws_id));
             HyprIPC::dispatch("movetoworkspace " + target_ws + ",address:" + n.hypr_address);
@@ -1729,51 +1626,47 @@ static void on_middle_click(GtkGestureClick*, int, double x, double y, gpointer 
 
 static void on_motion(GtkEventControllerMotion*, double x, double y, gpointer user_data) {
     OutputWindow* out = static_cast<OutputWindow*>(user_data);
-    g_graph.is_covered = false;
+    if (!out) return;
+    out->is_covered = false;
     ensure_physics_timer_running();
 
-    double sx = (out && out->width > 0) ? ((double)g_graph.screen_w / (double)out->width) : 1.0;
-    double sy = (out && out->height > 0) ? ((double)g_graph.screen_h / (double)out->height) : 1.0;
-    double rx = x * sx;
-    double ry = y * sy;
+    if (out->menu_open) {
+        double mx = std::clamp(out->menu_x, 15.0, out->width - out->menu_w - 15.0);
+        double my = std::clamp(out->menu_y, 42.0, out->height - out->menu_h - 15.0);
 
-    if (g_graph.menu_open) {
-        double mx = std::clamp(g_graph.menu_x, 15.0, g_graph.screen_w - g_graph.menu_w - 15.0);
-        double my = std::clamp(g_graph.menu_y, 42.0, g_graph.screen_h - g_graph.menu_h - 15.0);
-
-        if (rx >= mx && rx <= mx + g_graph.menu_w && ry >= my + 40.0 && ry <= my + g_graph.menu_h) {
-            int item = static_cast<int>((ry - (my + 40.0)) / 32.0);
-            if (item != g_graph.menu_hovered_item) {
-                g_graph.menu_hovered_item = item;
-                queue_all_outputs_redraw();
+        if (x >= mx && x <= mx + out->menu_w && y >= my + 40.0 && y <= my + out->menu_h) {
+            int item = static_cast<int>((y - (my + 40.0)) / 32.0);
+            if (item != out->menu_hovered_item) {
+                out->menu_hovered_item = item;
+                if (out->da) gtk_widget_queue_draw(out->da);
             }
             return;
-        } else if (g_graph.menu_hovered_item != -1) {
-            g_graph.menu_hovered_item = -1;
-            queue_all_outputs_redraw();
+        } else if (out->menu_hovered_item != -1) {
+            out->menu_hovered_item = -1;
+            if (out->da) gtk_widget_queue_draw(out->da);
         }
     }
 
-    int hovered_idx = hit_test_node(rx, ry);
+    int hovered_idx = hit_test_node(out, x, y);
     bool changed = false;
-    for (size_t i = 0; i < g_graph.nodes.size(); ++i) {
+    for (size_t i = 0; i < out->nodes.size(); ++i) {
         bool h = (static_cast<int>(i) == hovered_idx);
-        if (g_graph.nodes[i].is_hovered != h) {
-            g_graph.nodes[i].is_hovered = h;
+        if (out->nodes[i].is_hovered != h) {
+            out->nodes[i].is_hovered = h;
             changed = true;
         }
     }
 
     if (changed) {
-        wake_physics(0.35);
+        wake_output_physics(out, 0.35);
     }
 
-    if (out && out->da) {
+    if (out->da) {
         GtkNative* native = gtk_widget_get_native(out->da);
         if (native) {
             GdkSurface* surf = gtk_native_get_surface(native);
             if (surf) {
-                GdkCursor* cur = gdk_cursor_new_from_name((hovered_idx >= 0 || g_graph.menu_open) ? "pointer" : "default", nullptr);
+                GdkCursor* cur = gdk_cursor_new_from_name((hovered_idx >= 0 || out->menu_open) ? "pointer" : "default", nullptr);
                 gdk_surface_set_cursor(surf, cur);
                 g_object_unref(cur);
             }
@@ -1792,17 +1685,6 @@ static void sync_output_windows(GApplication* app) {
     if (!monitors) return;
     guint n_monitors = g_list_model_get_n_items(monitors);
     if (n_monitors == 0) return;
-
-    GdkMonitor* mon0 = GDK_MONITOR(g_list_model_get_item(monitors, 0));
-    if (mon0) {
-        GdkRectangle geom;
-        gdk_monitor_get_geometry(mon0, &geom);
-        if (geom.width > 0 && geom.height > 0) {
-            g_graph.screen_w = geom.width;
-            g_graph.screen_h = geom.height;
-        }
-        g_object_unref(mon0);
-    }
 
     std::string mode = g_graph.display_output;
     if (mode.empty()) mode = "all";
@@ -1888,6 +1770,7 @@ static void sync_output_windows(GApplication* app) {
                 gtk_widget_add_controller(out->da, motion);
 
                 rebuild_output_bg(out);
+                init_output_nodes(out, false);
                 gtk_window_present(GTK_WINDOW(out->win));
 
                 retained.push_back(out);
@@ -1905,55 +1788,41 @@ static void sync_output_windows(GApplication* app) {
 
     g_graph.outputs = retained;
     check_desktop_state();
-    wake_physics(0.5);
+    wake_all_outputs_physics(0.5);
 }
 
 static gboolean on_physics_tick(gpointer) {
     static uint32_t tick_count = 0;
     ++tick_count;
 
-    if ((tick_count & 3) == 0 || g_graph.fuzzel_active || g_popup_rep.active) {
+    if ((tick_count & 3) == 0) {
         check_fuzzel_state();
         check_popup_state();
     }
 
-    // TRUE ZERO-CPU SLEEP: Only stop timer completely if ALL displayed monitors are covered AND no user interaction
-    if (g_graph.auto_freeze && g_graph.is_covered && !g_graph.fuzzel_active && !g_popup_rep.active && g_popup_rep.smooth_weight < 0.01 && g_graph.return_timer <= 0.0) {
+    bool any_active = false;
+    for (auto* out : g_graph.outputs) {
+        if (!out) continue;
+        bool out_active = (!out->is_covered) || out->fuzzel_active || (out->return_timer > 0.0) || (out->dragged_node_idx >= 0);
+        if (out_active) {
+            any_active = true;
+            update_physics_for_output(out);
+            if (out->da) gtk_widget_queue_draw(out->da);
+        }
+    }
+
+    // TRUE ZERO-CPU SLEEP: Stop timer completely when all active displays are covered
+    if (!any_active && g_graph.auto_freeze) {
         g_graph.physics_timer_id = 0;
         return G_SOURCE_REMOVE;
     }
 
-    bool high_activity = (g_graph.dragged_node_idx >= 0) ||
-                         g_graph.fuzzel_active ||
-                         g_popup_rep.active ||
-                         (g_popup_rep.smooth_weight > 0.01) ||
-                         (g_graph.return_timer > 0.001) ||
-                         (g_graph.alpha > 0.22);
-
-    if (!high_activity) {
-        for (const auto& n : g_graph.nodes) {
-            double target_scale = n.is_hovered ? 1.16 : 1.0;
-            if (n.is_hovered || std::abs(n.cur_scale - target_scale) > 0.005 || std::hypot(n.vx, n.vy) > 0.18) {
-                high_activity = true;
-                break;
-            }
-        }
-    }
-
-    // Adaptive Frame Rate: 60 FPS during interaction/settlement, 20 FPS during sub-pixel ambient drift
-    if (!high_activity && (tick_count % 3 != 0)) {
-        return G_SOURCE_CONTINUE;
-    }
-
-    update_physics();
-    queue_all_outputs_redraw();
     return G_SOURCE_CONTINUE;
 }
 
 static void on_activate(GApplication* app, gpointer) {
     g_graph.app = app;
 
-    // Load pinned nodes first, then apply authoritative settings.json parameters & build background
     load_config(false);
     load_monolith_settings();
     setup_file_monitors();
