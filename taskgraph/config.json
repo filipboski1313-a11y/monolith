@@ -24,6 +24,14 @@
       "name": "Obsidian"
     },
     {
+      "exec": "firefox",
+      "icon": "firefox",
+      "id": "firefox",
+      "load_to_ram": false,
+      "match_class": "firefox",
+      "name": "Firefox"
+    },
+    {
       "exec": "chromium-browser",
       "icon": "chromium-browser",
       "id": "chromium",
